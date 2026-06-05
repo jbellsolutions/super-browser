@@ -195,28 +195,27 @@ asyncio.run(playwright_through_decodo("https://example.com"))
 # ---------------------------------------------------------------------------
 
 BROWSER_USE_DECODO_PATTERN = """
-from browser_use import Agent, Browser, BrowserConfig
-from browser_use.browser.browser import BrowserConfig
+# ⚠️ Browser Use open-source has NO built-in stealth and NO direct proxy support.
+# Proxy support is only available through Browser Use Cloud (use_cloud=True).
+# For local + Decodo, use Playwright directly (Pattern 3).
+# For anti-detection, use Browser Use Cloud with built-in proxies (Tier 1).
 
-# ⚠️ WARNING: Browser Use open-source has NO built-in stealth.
-# This will NOT bypass Cloudflare/Facebook/PerimeterX.
-# For those, use Browser Use Cloud (Tier 1).
+from browser_use.agent.service import Agent
+from browser_use import Browser
 
+# Option A: Use Browser Use Cloud (stealth + built-in proxy)
 browser = Browser(
-    config=BrowserConfig(
-        headless=False,  # Non-headless reduces detection somewhat
-        proxy={
-            "server": "http://{host}:{port}",
-            "username": "{user}",
-            "password": "{pass}",
-        }
-    )
+    use_cloud=True,                    # Cloud = hardened Chromium
+    cloud_proxy_country_code="us",     # Residential proxy
+    headless=False,
 )
+
+# Option B: Local open-source (NO stealth, NO proxy)
+# browser = Browser(headless=False)
 
 agent = Agent(
     task="Go to https://example.com and extract the main content",
-    llm_provider="anthropic",
-    llm_model="claude-sonnet-4-6",
+    llm="anthropic/claude-sonnet-4-6",
     browser=browser,
 )
 
@@ -226,7 +225,7 @@ async def main():
 
 import asyncio
 asyncio.run(main())
-""".format(host=PROXY_HOST, port=PROXY_PORTS[0], user=PROXY_USER, pass=PROXY_PASS)
+"""
 
 
 # ---------------------------------------------------------------------------
