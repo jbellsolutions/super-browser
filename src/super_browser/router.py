@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import math
+import socket
 from ipaddress import ip_address
 from numbers import Real
 from typing import Any
@@ -469,6 +470,17 @@ def target_scope_for_url(url: str | None) -> TargetScope:
     return _target_scope_for_url(_validate_url(url))
 
 
+def _canonical_ipv4(host: str) -> str | None:
+    # Browsers accept octal/hex/decimal and short-dotted IPv4 forms
+    # (e.g. 0177.0.0.1, 0x7f000001, 2130706433, 127.1) that ipaddress.ip_address
+    # rejects. Normalize them via inet_aton so obfuscated loopback/private
+    # targets classify correctly instead of falling through to public_web.
+    try:
+        return socket.inet_ntoa(socket.inet_aton(host))
+    except OSError:
+        return None
+
+
 def _target_scope_for_url(url: str | None) -> TargetScope:
     if not url:
         return "none"
@@ -486,9 +498,13 @@ def _target_scope_for_url(url: str | None) -> TargetScope:
     try:
         address = ip_address(host)
     except ValueError:
-        if host.endswith(PRIVATE_HOST_SUFFIXES) or "." not in host:
+        canonical = _canonical_ipv4(host)
+        if canonical is not None:
+            address = ip_address(canonical)
+        elif host.endswith(PRIVATE_HOST_SUFFIXES) or "." not in host:
             return "private_network"
-        return "public_web"
+        else:
+            return "public_web"
     if address.is_loopback:
         return "loopback"
     if address.is_link_local:

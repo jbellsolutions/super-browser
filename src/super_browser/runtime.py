@@ -545,10 +545,13 @@ def _block_expired_approval(run: RunState, plan: Plan, store: RunStore) -> RunSt
     ttl_seconds = _approval_ttl_seconds()
     decided_at = _parse_utc_datetime(approval.get("decided_at"))
     if decided_at is None:
-        return None
-    age_seconds = (datetime.now(timezone.utc) - decided_at).total_seconds()
-    if age_seconds <= ttl_seconds:
-        return None
+        # Fail closed: an approval whose decision timestamp is missing or
+        # unparseable cannot be proven fresh, so require a new approval.
+        age_seconds = None
+    else:
+        age_seconds = (datetime.now(timezone.utc) - decided_at).total_seconds()
+        if age_seconds <= ttl_seconds:
+            return None
     required_before = approval.get("required_before")
     if required_before not in {"provider_execution", "provider_retry"}:
         required_before = "provider_execution"
@@ -567,7 +570,7 @@ def _block_expired_approval(run: RunState, plan: Plan, store: RunStore) -> RunSt
             "reason": "approval_expired",
             "approval_id": approval.get("approval_id"),
             "approved_at": approval.get("decided_at"),
-            "age_seconds": int(age_seconds),
+            "age_seconds": int(age_seconds) if age_seconds is not None else None,
             "ttl_seconds": ttl_seconds,
             "required_before": required_before,
         }

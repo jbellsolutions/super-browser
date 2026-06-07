@@ -206,4 +206,4 @@ def _approval_risk(task: TaskSpec | dict[str, Any]) -> str:
         return "local_file"
     if _task_value(task, "requires_auth") or policy_risk == "credential":
         return "credential"
-    return "credential"
+    return "read"

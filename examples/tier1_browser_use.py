@@ -53,12 +53,7 @@ def get_client():
     from browser_use_sdk.v3 import BrowserUse
 
     client = BrowserUse(api_key=API_KEY)
-
-    # Verify account
-    account = client.account.get()
-    print(f"✓ Connected — plan: {account.plan.name if hasattr(account, 'plan') else 'unknown'}")
-    print(f"  Credits: {account.credits_remaining if hasattr(account, 'credits_remaining') else 'N/A'}")
-
+    print("✓ Browser Use Cloud client initialized")
     return client
 
 
@@ -88,7 +83,7 @@ def scrape_meta_ad_library(client, keyword: str = "bath remodel"):
 
     try:
         # Run the task — natural language, no brittle selectors
-        result = client.sessions.run(
+        result = client.run(
             session_id=session.id,
             task=f"""
             Go to https://www.facebook.com/ads/library/
@@ -137,7 +132,7 @@ def extract_structured_data(client, url: str, task: str):
     )
 
     try:
-        result = client.sessions.run(
+        result = client.run(
             session_id=session.id,
             task=task,
             output_schema=ProductInfo,  # ← Returns list[ProductInfo]

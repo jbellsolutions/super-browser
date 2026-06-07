@@ -9,6 +9,13 @@ from .models import ProviderCapability
 from .redaction import redact_text
 
 
+def _has_module(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 SUPPORTED_LIVE_WORKFLOW_CLASSES = {
     "decodo-http": ["raw_http_direct", "external_write_gate"],
     "playwright": ["local_browser_fixture", "external_write_gate"],
@@ -160,17 +167,17 @@ def provider_readiness() -> list[dict]:
             cli = bool(shutil.which("playwright"))
         package = None
         if provider.name == "playwright":
-            package = importlib.util.find_spec("playwright.sync_api") is not None
+            package = _has_module("playwright.sync_api")
         elif provider.name == "browserbase-stagehand":
-            package = importlib.util.find_spec("browserbase") is not None and importlib.util.find_spec("playwright.sync_api") is not None
+            package = _has_module("browserbase") and _has_module("playwright.sync_api")
         elif provider.name == "browser-use":
-            package = importlib.util.find_spec("browser_use_sdk") is not None
+            package = _has_module("browser_use_sdk")
         elif provider.name == "orgo":
             package = True
         elif provider.name in {"airtop", "hyperbrowser", "browserless"}:
             package = True
         elif provider.name == "steel":
-            package = importlib.util.find_spec("playwright.sync_api") is not None
+            package = _has_module("playwright.sync_api")
         browser_runtime_available = None
         browser_runtime_error = None
         if provider.name == "playwright" and package:

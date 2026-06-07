@@ -1244,6 +1244,8 @@ class BrowserbaseAdapter:
                 verification={"confidence": "low", "checks": ["credentials present", "Browserbase package import failed"]},
             )
         scope_guard: _BrowserRequestScopeGuard | None = None
+        bb = None
+        session_id: str | None = None
         try:
             bb = Browserbase(api_key=os.environ["BROWSERBASE_API_KEY"])
             session_timeout_seconds = _browserbase_session_timeout_seconds(plan.task)
@@ -1269,7 +1271,7 @@ class BrowserbaseAdapter:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.connect_over_cdp(connect_url)
                 try:
-                    context = browser.contexts[0]
+                    context = browser.contexts[0] if browser.contexts else browser.new_context()
                     page = context.pages[0] if context.pages else context.new_page()
                     scope_guard = _install_browser_request_scope_guard(page, context, plan.task)
                     page.goto(plan.task.url, wait_until="domcontentloaded", timeout=navigation_timeout_ms)
@@ -1285,6 +1287,7 @@ class BrowserbaseAdapter:
                 finally:
                     close_error = _safe_browser_close(browser)
         except PlaywrightError as exc:
+            _release_browserbase_session(bb, session_id)
             if scope_guard and scope_guard.blocked_requests:
                 return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
             return ExecutionResult(
@@ -1294,6 +1297,7 @@ class BrowserbaseAdapter:
                 events=[_event("blocked", "browserbase_playwright_failed")],
             )
         except Exception as exc:
+            _release_browserbase_session(bb, session_id)
             return ExecutionResult(
                 provider=self.name,
                 status="failed",
@@ -1837,6 +1841,22 @@ class ExternalProviderAdapter:
             events=[_event("blocked", "adapter_not_implemented")],
             verification={"confidence": "low", "checks": ["provider selected", "adapter pending implementation"]},
         )
+
+
+def _release_browserbase_session(bb: Any, session_id: str | None) -> None:
+    # Best-effort release so a session created before a failed CDP connect does
+    # not linger (and bill) until its server-side timeout. Safe to call on an
+    # already-ended session; any SDK/transport error is intentionally ignored.
+    if bb is None or not session_id or session_id == "unknown":
+        return
+    try:
+        bb.sessions.update(
+            session_id,
+            status="REQUEST_RELEASE",
+            project_id=os.environ.get("BROWSERBASE_PROJECT_ID"),
+        )
+    except Exception:
+        return
 
 
 def _missing_credentials_result(provider_name: str, missing: list[str]) -> ExecutionResult:

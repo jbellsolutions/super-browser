@@ -1,6 +1,6 @@
 {
   "name": "super-browser",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Universal browser and computer automation plugin for agents. Includes specialist skills, a routing CLI, and an MCP server for choosing the right browser, proxy, authenticated session, or desktop backend.",
   "author": {
     "name": "AI Integraterz",

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "super-browser"
-version = "0.3.0"
+version = "0.3.1"
 description = "Provider-neutral browser and computer automation router for agents."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,12 @@ dependencies = []
 dev = ["pytest>=8"]
 mcp = ["mcp>=1.0"]
 playwright = ["playwright>=1.40"]
+browserbase = ["browserbase>=1.0,<2", "playwright>=1.40"]
+browser-use = ["browser-use-sdk>=3.0,<4"]
+# Convenience meta-extra pulling in every Python-SDK-backed provider.
+# Orgo, Airtop, Hyperbrowser, Browserless, Decodo and Rtrvr adapters use the
+# stdlib HTTP client / a CLI, so they need no extra Python packages here.
+all-providers = ["playwright>=1.40", "browserbase>=1.0,<2", "browser-use-sdk>=3.0,<4"]
 
 [project.scripts]
 super-browser = "super_browser.cli:main"
@@ -41,7 +47,6 @@ where = ["src"]
 "share/super-browser/docs" = [
   "docs/anti-detection-results.md",
   "docs/architecture.svg",
-  "docs/conversation-history.md",
   "docs/plugin-architecture.svg",
   "docs/research-airtop.md",
   "docs/research-anchor-orgo.md",

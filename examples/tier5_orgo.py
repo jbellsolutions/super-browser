@@ -36,9 +36,16 @@ BASE_URL = "https://api.orgo.ai/v1"
 
 
 # ============================================================================
-# NOTE: The Orgo Python SDK is hypothetical. The actual SDK may differ.
-# This code demonstrates the CONCEPTUAL patterns for full desktop VM control.
-# Check https://orgo.ai/docs for the actual SDK.
+# NOTE: This file is an ILLUSTRATIVE SKETCH. The `OrgoClient` below is a
+# simulation, not a working client — it does not call Orgo.
+#
+# The REAL, production integration lives in src/super_browser/adapters.py
+# (`OrgoAdapter`), which calls Orgo's live HTTP API and is exercised by the
+# test suite. To actually run an Orgo task, use the router instead of this file:
+#
+#     super-browser run --goal "<desktop task>"      # routes to Orgo when appropriate
+#
+# Check https://orgo.ai/docs for the current SDK/API surface.
 # ============================================================================
 
 

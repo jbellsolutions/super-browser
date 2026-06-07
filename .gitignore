@@ -19,6 +19,7 @@ node_modules/
 *.db
 build/
 dist/
+*.egg-info/
 htmlcov/
 .coverage
 coverage.xml

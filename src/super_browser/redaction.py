@@ -46,11 +46,12 @@ _QUERY_SECRET_RE = re.compile(
 _BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 _BASIC_RE = re.compile(r"\bBasic\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 _URL_USERINFO_RE = re.compile(
-    r"\b(?P<scheme>(?:https?|wss?|ftp)://)(?P<userinfo>[^/?#\s@]+@)",
+    r"\b(?P<scheme>[a-z][a-z0-9+.-]*://)(?P<userinfo>[^/?#\s@]+@)",
     re.IGNORECASE,
 )
 _ENV_ASSIGNMENT_RE = re.compile(
-    r"\b(?P<name>[A-Z0-9_]*(?:API_KEY|AUTHORIZATION|COOKIE|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*)=(?P<value>[^\s]+)",
+    r"\b(?P<name>[A-Z0-9_]*(?:API_KEY|AUTHORIZATION|COOKIE|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*)="
+    r"(?P<value>\"[^\"]*\"|'[^']*'|[^\s]+)",
     re.IGNORECASE,
 )
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")

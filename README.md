@@ -38,7 +38,16 @@ Each installed bundle includes `super-browser-manifest.json`, a hashed handoff i
 ### CLI
 
 ```bash
+# Base install: routing, planning, diagnostics, and the CLI + MCP surface (no provider SDKs).
+# `doctor` runs here and reports which providers still need setup.
 python3 -m pip install -e .
+
+# Add the free local browser (Playwright) to make the default local tier usable:
+python3 -m pip install -e ".[playwright]" && python3 -m playwright install chromium
+
+# Or install every Python-SDK-backed provider at once (Playwright + Browserbase + Browser Use):
+python3 -m pip install -e ".[all-providers]" && python3 -m playwright install chromium
+
 super-browser doctor
 super-browser providers
 super-browser plan --goal "Extract all product names from https://example.com"
@@ -380,6 +389,7 @@ The manifest is a redacted JSON inventory with SHA-256 hashes for bundle files, 
 
 ## Verified Status
 
+- All automated checks pass via `./scripts/verify-super-browser` (unit tests, compile checks, CLI/MCP diagnostics, fixture live tests, and a no-credential provider sweep). Diagnostics (`doctor`, `env-checklist`, `providers`) run on a base install with no provider SDKs present.
 - Verified locally: router, policy, strict provider allowlists, URL normalization and whitespace rejection, max-cost routing constraints, runtime provider-sequence enforcement for allowlists/file URLs/cost ceilings/target-scope mismatches/missing starting URLs/raw HTTP missing HTTP endpoints, provider execution timeout propagation, structured `council_report`, verifier `policy_guard`, non-resumable target-scope/DNS safety stops in verifier, handoff, and direct resume, provider transport override guards before credentials are sent, run-report `run_id` and `plan_sha256`, newest run-report selection, verifier `run_id_integrity` and `plan_integrity`, run-report final provider/status consistency with attempts, handoff and direct-resume unsafe behavior for invalid run ids, missing run reports, missing artifact paths, artifact hash mismatches, mismatched run-report run ids, untrusted artifact paths, untrusted run-report fingerprints, `final_status` mismatches, final-provider/attempt inconsistencies, provider sequence violations, and approval-integrity failures, verifier `approval_integrity`, cost estimates and budget status in plans/run reports/verifier output, approval audit trail, low-level adapter approval guard, duplicate external-write retry guard, policy-derived long-running leases, stale execution lease recovery, corrupt stored-run payload surfacing and resume blocking, durable active-resume no-ops, terminal execution-lease cleanup, runtime run-report synthesis for bare terminal execution results, retry artifact manifest replacement, read-only run lookup/listing/handoff, setup helpers for skill bundle install and MCP config generation, no-value env checklist generation, provider readiness blocking for package-only Playwright installs with missing Chromium runtime, secret redaction for reports/artifacts/stored runs, artifact manifests with SHA-256 verification, raw HTTP redirect target-scope blocking, DNS/target-scope preflight for URL-capable remote/desktop providers including unresolved public-host stops, browser request target-scope blocking for Playwright-backed adapters, run store, CLI, redacted structured CLI command errors, lightweight MCP JSON-RPC with input schemas, validation, structured content, notification handling, structured malformed tool-call and known-tool exception errors, clear malformed resource-read errors, and malformed-request id isolation, raw HTTP fixture execution, Playwright browser fixture execution, fixture matrix execution including social feed scan/comment drafting without publishing and lead-generation extraction to local artifacts without CRM/email actions, provider fallback execution, provider adapter exception capture with fallback continuation and failed run reports, runtime execution exception capture with lease cleanup, failed run reports, and external-write retry gating, active verifier reports, safe resume behavior, `run-report.json`, and `verification-report.json` generation.
 - Browserbase adapter: implemented through the `browserbase` Python SDK plus Playwright CDP with bounded provider-native session timeouts; contract-tested with fake SDK/browser objects and live-gated by `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`.
 - Browser Use adapter: implemented through `browser_use_sdk.v3.AsyncBrowserUse`; contract-tested with fake SDK success and failure responses and live-gated by `BROWSER_USE_API_KEY`.
@@ -421,7 +431,7 @@ export SUPER_BROWSER_STATE_DIR=/tmp/super-browser-state
 Browserbase:
 
 ```bash
-python3 -m pip install browserbase playwright
+python3 -m pip install -e ".[browserbase]" && python3 -m playwright install chromium
 export BROWSERBASE_API_KEY=...
 export BROWSERBASE_PROJECT_ID=...
 super-browser run --goal "Extract the page title" --url "https://example.com"
@@ -430,7 +440,7 @@ super-browser run --goal "Extract the page title" --url "https://example.com"
 Browser Use:
 
 ```bash
-python3 -m pip install browser-use-sdk
+python3 -m pip install -e ".[browser-use]"
 export BROWSER_USE_API_KEY=...
 super-browser run --goal "Search a protected public site and return JSON" --url "https://example.com"
 ```
@@ -468,7 +478,7 @@ super-browser run --goal "Scrape page markdown and links with Hyperbrowser" --ur
 Steel:
 
 ```bash
-python3 -m pip install playwright
+python3 -m pip install -e ".[playwright]" && python3 -m playwright install chromium
 export STEEL_API_KEY=...
 super-browser run --goal "Capture page artifacts with Steel" --url "https://example.com"
 ```
