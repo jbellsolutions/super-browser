@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT_DIR}"
+
+export PYTHONPATH="${ROOT_DIR}/src:${PYTHONPATH:-}"
+
+VERIFY_TMP_DIR="${SUPER_BROWSER_VERIFY_TMP_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/super-browser-verify.XXXXXX")}"
+VERIFY_OWNS_TMP=1
+if [[ -n "${SUPER_BROWSER_VERIFY_TMP_DIR:-}" ]]; then
+  mkdir -p "${VERIFY_TMP_DIR}"
+  VERIFY_OWNS_TMP=0
+fi
+
+remove_repo_pycache() {
+  find src tests examples -type d -name __pycache__ -prune -exec rm -rf {} +
+}
+
+cleanup() {
+  remove_repo_pycache
+  if [[ "${VERIFY_OWNS_TMP}" == "1" ]]; then
+    rm -rf "${VERIFY_TMP_DIR}"
+  fi
+}
+trap cleanup EXIT
+
+export SUPER_BROWSER_STATE_DIR="${SUPER_BROWSER_VERIFY_STATE_DIR:-${VERIFY_TMP_DIR}/state}"
+export PYTHONPYCACHEPREFIX="${SUPER_BROWSER_VERIFY_PYCACHE_DIR:-${VERIFY_TMP_DIR}/pycache}"
+mkdir -p "${SUPER_BROWSER_STATE_DIR}" "${PYTHONPYCACHEPREFIX}"
+remove_repo_pycache
+
+echo "== unit tests =="
+python3 -m unittest discover -s tests
+
+echo "== compile check =="
+python3 -m compileall -q src tests examples
+
+echo "== doctor =="
+./scripts/super-browser doctor
+
+echo "== bundle manifest =="
+./scripts/super-browser bundle-manifest
+
+echo "== env checklist =="
+./scripts/super-browser env-checklist
+
+echo "== fixture live tests =="
+./scripts/super-browser live-test --provider fixtures
+
+echo "== no-key provider sweep =="
+env \
+  -u BROWSERBASE_API_KEY \
+  -u BROWSERBASE_PROJECT_ID \
+  -u BROWSER_USE_API_KEY \
+  -u RTRVR_API_KEY \
+  -u ORGO_API_KEY \
+  -u ORGO_COMPUTER_ID \
+  -u AIRTOP_API_KEY \
+  -u HYPERBROWSER_API_KEY \
+  -u STEEL_API_KEY \
+  -u BROWSERLESS_TOKEN \
+  ./scripts/super-browser live-test --provider all
+
+echo "== production readiness gate =="
+set +e
+./scripts/super-browser production-readiness
+PRODUCTION_READINESS_STATUS=$?
+set -e
+if [[ "${PRODUCTION_READINESS_STATUS}" != "0" && "${PRODUCTION_READINESS_STATUS}" != "1" ]]; then
+  echo "production-readiness exited unexpectedly with ${PRODUCTION_READINESS_STATUS}" >&2
+  exit "${PRODUCTION_READINESS_STATUS}"
+fi
+
+PLUGIN_VALIDATOR="${PLUGIN_VALIDATOR:-/Users/home/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py}"
+SKILL_VALIDATOR="${SKILL_VALIDATOR:-/Users/home/.codex/skills/.system/skill-creator/scripts/quick_validate.py}"
+VALIDATOR_PYTHON="${VALIDATOR_PYTHON:-}"
+
+if [[ -z "${VALIDATOR_PYTHON}" ]]; then
+  if [[ -x "/tmp/super-browser-validate-venv/bin/python" ]]; then
+    VALIDATOR_PYTHON="/tmp/super-browser-validate-venv/bin/python"
+  else
+    VALIDATOR_PYTHON="python3"
+  fi
+fi
+
+if [[ -f "${PLUGIN_VALIDATOR}" ]]; then
+  echo "== plugin validation =="
+  "${VALIDATOR_PYTHON}" "${PLUGIN_VALIDATOR}" .
+else
+  echo "== plugin validation skipped: validator not found =="
+fi
+
+if [[ -f "${SKILL_VALIDATOR}" ]]; then
+  echo "== skill validation =="
+  for path in SKILL.md skills/*/SKILL.md; do
+    if [[ "${path}" == "SKILL.md" ]]; then
+      dir="."
+    else
+      dir="${path%/SKILL.md}"
+    fi
+    "${VALIDATOR_PYTHON}" "${SKILL_VALIDATOR}" "${dir}"
+  done
+else
+  echo "== skill validation skipped: validator not found =="
+fi
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "== whitespace check =="
+  git diff --check
+fi

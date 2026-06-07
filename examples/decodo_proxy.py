@@ -32,8 +32,8 @@ from urllib.parse import urlparse
 
 PROXY_HOST = "us.decodo.com"
 PROXY_PORTS = [10001, 10002, 10003, 10004, 10005, 10006, 10007]
-PROXY_USER = "spo2nwl1tw"
-PROXY_PASS = os.environ.get("DECODO_PASSWORD", "***")
+PROXY_USER = os.environ.get("DECODO_USER", "YOUR_DECODO_USER")
+PROXY_PASS = os.environ.get("DECODO_PASSWORD", "YOUR_DECODO_PASSWORD")
 
 # Round-robin port for IP rotation
 import itertools
@@ -58,21 +58,21 @@ def get_proxy_dict() -> dict:
 
 CURL_PATTERN = """
 # Single request through Decodo
-curl -x "http://{user}:{pass}@{host}:{port}" \\
+curl -x "http://{user}:{password}@{host}:{port}" \\
   "https://api.target.com/data" \\
   -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \\
   -H "Accept: application/json"
 
 # With IP rotation (different port = different exit IP)
-curl -x "http://{user}:{pass}@{host}:10001" "https://api.target.com/endpoint1"
-curl -x "http://{user}:{pass}@{host}:10002" "https://api.target.com/endpoint2"
+curl -x "http://{user}:{password}@{host}:10001" "https://api.target.com/endpoint1"
+curl -x "http://{user}:{password}@{host}:10002" "https://api.target.com/endpoint2"
 
 # POST with JSON body
-curl -x "http://{user}:{pass}@{host}:10001" \\
+curl -x "http://{user}:{password}@{host}:10001" \\
   -X POST "https://api.target.com/submit" \\
   -H "Content-Type: application/json" \\
   -d '{{"key": "value"}}'
-""".format(user=PROXY_USER, pass=PROXY_PASS, host=PROXY_HOST, port=PROXY_PORTS[0])
+""".format(user=PROXY_USER, password=PROXY_PASS, host=PROXY_HOST, port=PROXY_PORTS[0])
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ async def playwright_through_decodo(url: str):
             proxy={{
                 "server": "http://{host}:{port}",
                 "username": "{user}",
-                "password": "{pass}",
+                "password": "{password}",
             }}
         )
 
@@ -187,7 +187,7 @@ async def playwright_through_decodo(url: str):
 
 # Run it
 asyncio.run(playwright_through_decodo("https://example.com"))
-""".format(host=PROXY_HOST, port=PROXY_PORTS[0], user=PROXY_USER, pass=PROXY_PASS)
+""".format(host=PROXY_HOST, port=PROXY_PORTS[0], user=PROXY_USER, password=PROXY_PASS)
 
 
 # ---------------------------------------------------------------------------

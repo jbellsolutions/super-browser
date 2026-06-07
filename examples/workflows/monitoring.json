@@ -1,0 +1,6 @@
+{
+  "goal": "Monitor this competitor pricing page every day and report changes without submitting anything.",
+  "expected_route": ["playwright", "browserbase-stagehand", "airtop"],
+  "approval_required": false
+}
+

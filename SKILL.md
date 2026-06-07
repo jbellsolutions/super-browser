@@ -1,501 +1,147 @@
-     1|---
-     2|name: super-browser
-     3|version: "2.0"
-     4|description: Five-tier browser and desktop automation stack — Browser Use Cloud (anti-detection), Browserbase (quick tasks), Airtop (no-code), Rtrvr (MCP), Orgo Machines (full desktop VMs), Decodo (raw proxies). Strategic routing by task type and protection level.
-     5|---
-     6|
-     7|# Super Browser — Multi-Layer Automation Stack
-     8|
-     9|Five-tier automation architecture. From quick single-page extraction to full desktop VM control, with Decodo residential proxies as the raw proxy backbone.
-    10|
-    11|## Architecture Overview
-    12|
-    13|```
-    14|┌─────────────────────────────────────────────────────────┐
-    15|│                   SUPER BROWSER STACK                    │
-    16|├─────────────┬─────────────┬──────────┬────────┬─────────┤
-    17|│  TIER 1     │  TIER 2     │ TIER 3   │ TIER 4 │ TIER 5  │
-    18|│  Browser    │  Browser-   │ Airtop   │ Rtrvr  │ Orgo    │
-    19|│  Use Cloud  │  base       │          │        │ Machines│
-    20|├─────────────┼─────────────┼──────────┼────────┼─────────┤
-    21|│ Anti-detect │ Quick       │ No-code  │ MCP    │ Full    │
-    22|│ Hardened    │ Single-page │ SaaS     │ Auth   │ Desktop │
-    23|│ Chromium    │ extraction  │ Backup   │ Sessions│ VMs     │
-    24|├─────────────┼─────────────┼──────────┼────────┼─────────┤
-    25|│ $29/mo      │ Free        │ $26/mo   │ BYOK   │ $29/mo  │
-    26|└─────────────┴─────────────┴──────────┴────────┴─────────┘
-    27|                      │
-    28|              ┌───────┴───────┐
-    29|              │    DECODO     │
-    30|              │  Raw Proxies  │
-    31|              │   $2/GB       │
-    32|              └───────────────┘
-    33|```
-    34|
-    35|## Quick Decision Matrix
-    36|
-    37|| Site Type | Primary | Fallback | Cost |
-    38||-----------|---------|----------|------|
-    39|| **Meta/Facebook** | Browser Use Cloud | Browserbase | $0.02/hr + $5/GB proxy |
-    40|| **LinkedIn** | Browser Use Cloud | Rtrvr Extension | $0.02/hr + $5/GB proxy |
-    41|| **Anti-bot protected (Cloudflare, PerimeterX)** | Browser Use Cloud | Airtop | $0.02/hr + $5/GB proxy |
-    42|| **JS-heavy SPAs** | Browser Use Cloud | Browserbase | $0.02/hr + $5/GB proxy |
-    43|| **Quick single-page** | Browserbase (browser tool) | Rtrvr scrape | Free tier |
-    44|| **Authenticated sites (OAuth, cookies)** | Rtrvr Extension | Browser Use Cloud Profiles | Free (BYOK) / $29/mo |
-    45|| **Scheduled GTM workflows** | Airtop | Browser Use Cloud cron | $26/mo |
-    46|| **Raw API calls (JSON endpoints)** | curl + Decodo proxy | requests + Decodo | $2/GB |
-    47|| **Local development/testing** | Browser Use open-source | Playwright + stealth | Free (bring LLM keys) |
-    48|
-    49|| **Full desktop automation** | Orgo Machines | Manual fallback | $29/mo (5 VMs) |
-    50|| **When browser isn't enough** | Orgo Machines | Manual intervention | $29/mo |
-    51|
-    52|## Tier 1: Browser Use Cloud (PRIMARY WORKHORSE)
-    53|
-    54|### Why It's #1
-    55|
-    56|Browser Use Cloud runs a **hardened, forked Chromium** with anti-detect fingerprinting that passes CreepJS and BrowserLeaks. Canvas, WebGL, fonts, and navigator properties are randomized per session. It auto-bypasses Cloudflare, PerimeterX, and most anti-bot challenges. This is the only tool that consistently worked against Meta Ad Library in our testing.
-    57|
-    58|Built-in **US residential proxies** (195+ countries available) — no separate proxy service needed for most use cases. Ad and cookie banner auto-dismissal included.
-    59|
-    60|### Pricing
-    61|
-    62|- **Dev plan: $29/mo** ($29 credits)
-    63|- Browser: $0.02/hr
-    64|- Proxy bandwidth: $5/GB
-    65|- LLM tokens: 1.2x provider rates (Claude Sonnet 4.6 at $3.60/$18.00 per 1M)
-    66|- Free tier: 10 tasks/mo, 3 concurrent sessions
-    67|
-    68|### Python SDK (v3) — Primary Integration
-    69|
-    70|```python
-    71|from browser_use_sdk.v3 import BrowserUse, BuModel, ProxyCountryCode
-    72|
-    73|# Initialize
-    74|client = BrowserUse(api_key="bu_live_...")  # or env: BROWSER_USE_API_KEY
-    75|
-    76|# Create a session (isolated browser with proxy)
-    77|session = client.sessions.create(
-    78|    model=BuModel.claude_sonnet_4_6,           # Best for complex tasks
-    79|    proxy_country_code=ProxyCountryCode.US,     # US residential proxy
-    80|    # proxy_country_code=None,                  # Disable proxy if not needed
-    81|    keep_alive=True,                            # Persist between tasks
-    82|)
-    83|
-    84|# Run a task
-    85|result = client.sessions.run(
-    86|    session_id=session.id,
-    87|    task="Go to facebook.com/ads/library, search for 'bath remodel'..."
-    88|)
-    89|
-    90|# Get structured output (Pydantic model)
-    91|from pydantic import BaseModel
-    92|
-    93|class Advertiser(BaseModel):
-    94|    name: str
-    95|    page_url: str
-    96|    ad_count: int
-    97|
-    98|result = client.sessions.run(
-    99|    session_id=session.id,
-   100|    task="Extract all advertisers and their ad counts",
-   101|    output_schema=Advertiser,  # Returns typed list[Advertiser]
-   102|)
-   103|
-   104|# Stop session when done
-   105|client.sessions.stop(session_id=session.id)
-   106|```
-   107|
-   108|### CDP WebSocket (Direct Browser Control)
-   109|
-   110|Connect Playwright/Puppeteer/Selenium directly to Browser Use's cloud browsers:
-   111|
-   112|```python
-   113|from playwright.async_api import async_playwright
-   114|
-   115|# Get CDP URL from Browser Use
-   116|browser = client.browsers.create(
-   117|    proxy_country_code=ProxyCountryCode.US,
-   118|    keep_alive=True,
-   119|)
-   120|cdp_url = browser.cdp_url  # wss://connect.browser-use.com?apiKey=***&sessionId=...
-   121|
-   122|# Connect Playwright
-   123|async with async_playwright() as p:
-   124|    browser = await p.chromium.connect_over_cdp(cdp_url)
-   125|    page = browser.contexts[0].pages[0]
-   126|    await page.goto("https://facebook.com/ads/library")
-   127|    # ... full Playwright control ...
-   128|```
-   129|
-   130|### MCP Server (AI Agent Integration)
-   131|
-   132|Add to Hermes `config.yaml`:
-   133|
-   134|```yaml
-   135|mcp_servers:
-   136|  browser-use:
-   137|    type: http
-   138|    url: https://api.browser-use.com/v3/mcp
-   139|    headers:
-   140|      Authorization: "Bearer bu_live_YOUR_API_KEY"
-   141|```
-   142|
-   143|### CLI
-   144|
-   145|```bash
-   146|# Install
-   147|uvx browser-use install
-   148|
-   149|# Interactive
-   150|browser-use open https://example.com
-   151|browser-use state
-   152|browser-use click "Login"
-   153|browser-use type "username" "hello@example.com"
-   154|browser-use screenshot page.png
-   155|```
-   156|
-   157|### Key Features
-   158|
-   159|- **Profiles**: Persistent cookies/localStorage across sessions
-   160|- **2FA handling**: Agent Mail (auto-enabled inbox), TOTP via pyotp, human-in-the-loop
-   161|- **Recording**: MP4 video recording of sessions
-   162|- **Live preview**: `live_url` for real-time observation
-   163|- **Structured output**: Pydantic/Zod schemas
-   164|- **Deterministic rerun**: Cache workflows, ~99% cheaper re-runs
-   165|- **Workspaces**: Upload/download files for agent use
-   166|- **Streaming**: `for await` pattern for real-time agent messages
-   167|
-   168|### Limitations
-   169|
-   170|- Session timeout: 15 min inactivity, max 4 hours
-   171|- Recording URLs expire in 1 hour
-   172|- Custom proxy requires **enterprise plan** (above Scaleup) — can't use Decodo directly
-   173|- v3 agent is cloud-only, not in open-source
-   174|- $5/GB proxy bandwidth can add up for data-heavy scraping
-   175|
-   176|---
-   177|
-   178|## Tier 2: Browserbase (QUICK TASKS)
-   179|
-   180|Already integrated into Hermes via the `browser_*` tools. Zero setup, zero cost (free tier).
-   181|
-   182|### Available Tools
-   183|
-   184|- `browser_navigate` — load a URL, returns accessibility snapshot
-   185|- `browser_click` — click elements by ref ID
-   186|- `browser_type` — type into input fields
-   187|- `browser_scroll` — scroll up/down
-   188|- `browser_snapshot` — get page accessibility tree
-   189|- `browser_console` — JS execution, console log reading
-   190|- `browser_vision` — screenshot + AI analysis
-   191|- `browser_get_images` — list all images on page
-   192|- `browser_back` — navigate back
-   193|- `browser_press` — keyboard keys
-   194|
-   195|### When to Use
-   196|
-   197|- Single-page extraction (quick, no session management)
-   198|- Visual verification (CAPTCHAs, page rendering)
-   199|- Interactive debugging (click around, see what happens)
-   200|- Lightweight scraping of non-aggressively-protected pages
-   201|
-   202|### Known Issues
-   203|
-   204|- Fragile at scale — **Facebook blocks after ~2-3 queries** (API splash page)
-   205|- No persistent profiles between sessions
-   206|- No custom proxy injection (uses Browserbase's own infrastructure)
-   207|- Subagent timeout at 600s for long-running tasks
-   208|- Success rate: ~71% page loads (vs Anchor's claimed 93%)
-   209|
-   210|### Extraction Pattern (Proven)
-   211|
-   212|```javascript
-   213|// Inside browser_console for Meta Ad Library
-   214|const links = document.querySelectorAll('a[href*="/"]');
-   215|const advertisers = new Set();
-   216|links.forEach(a => {
-   217|    const href = a.getAttribute('href');
-   218|    if (href && !href.includes('facebook.com/ads')) {
-   219|        advertisers.add(JSON.stringify({name: a.textContent.trim(), url: href}));
-   220|    }
-   221|});
-   222|return [...advertisers].map(JSON.parse);
-   223|```
-   224|
-   225|---
-   226|
-   227|## Tier 3: Airtop (NO-CODE BACKUP)
-   228|
-   229|### When to Use
-   230|
-   231|Browser Use Cloud is the primary tool, but Airtop fills gaps:
-   232|- **Non-developer workflows** — marketing/sales can build agents without code
-   233|- **Pre-built templates** — faster than coding from scratch for common GTM patterns
-   234|- **Scheduled monitoring** — built-in scheduling vs coding cron + Browser Use
-   235|- **SOC2/HIPAA compliance** — enterprise requirements Browser Use doesn't meet
-   236|
-   237|### Setup
-   238|
-   239|- Sign up at airtop.ai
-   240|- Starter plan: $26/mo (30K-150K credits)
-   241|- API key from portal.airtop.ai/api-keys
-   242|- Base URL: `https://api.airtop.ai/api/`
-   243|
-   244|### REST API
-   245|
-   246|```bash
-   247|# Trigger an agent
-   248|curl -X POST "https://api.airtop.ai/api/hooks/agents/{agentId}/webhooks/{webhookId}" \
-   249|  -H "Authorization: Bearer *** \
-   250|  -H "Content-Type: application/json" \
-   251|  -d '{"configVars": {"url": "https://target.com"}}'
-   252|
-   253|# Get results
-   254|curl "https://api.airtop.ai/api/invocations/{invocationId}" \
-   255|  -H "Authorization: Bearer ***
-   256|```
-   257|
-   258|### Proxy Support
-   259|
-   260|- Built-in residential proxy (Starter+)
-   261|- Custom proxy (Professional+): Oxylabs, Smartproxy, IPRoyal supported
-   262|- Decodo could work as custom proxy on Professional plan ($170/mo)
-   263|
-   264|---
-   265|
-   266|## Tier 4: Rtrvr (MCP + AUTH SESSIONS)
-   267|
-   268|Already documented in `rtrvr` skill. Key use cases in this stack:
-   269|
-   270|- **Authenticated sessions**: Chrome Extension preserves login state
-   271|- **MCP integration**: 8 MCP tools available to any MCP client
-   272|- **BYOK (Gemini)**: Free usage with your own Gemini API key
-   273|
-   274|### When to Prefer Rtrvr Over Browser Use Cloud
-   275|
-   276|- Task requires logged-in session to a service you already have auth for
-   277|- Need MCP-native tool calling (not wrapping a REST API)
-   278|- Cost-sensitive: BYOK Gemini = free, vs Browser Use Cloud at $0.02/hr + LLM costs
-   279|
-   280|---
-   281|
-   282|---
-   283|
-   284|## Tier 5: Orgo Machines (FULL DESKTOP VMs)
-   285|
-   286|### Why It Exists in This Stack
-   287|
-   288|Sometimes browser automation isn't enough. You need a real computer — a full Linux desktop with applications, file systems, terminals, and multi-window workflows. Orgo provides sub-500ms boot cloud VMs that AI agents can fully control. When Browser Use Cloud or Browserbase can't handle a task because it requires:
-   289|
-   290|- Desktop applications (not web apps)
-   291|- Multi-window workflows
-   292|- File system operations + browser simultaneously
-   293|- Local development environments
-   294|- GPU-accelerated workloads
-   295|- Complex software that doesn't expose a web interface
-   296|
-   297|### Pricing
-   298|
-   299|| Plan | Price/mo | VMs | vCPU | RAM | Disk | AI Credits |
-   300||------|----------|-----|------|-----|------|------------|
-   301|| **Hacker** | $29 | 5 | 1 | 4GB | 20GB | $10 |
-   302|| Team | $112 | 20 | 2 | 8GB | 30GB | $50 |
-   303|| Scale | $224 | 50 | 4 | 16GB | 50GB | $100 |
-   304|
-   305|Annual billing: ~10% discount. All plans include AI credits for LLM usage.
-   306|
-   307|### Python SDK
-   308|
-   309|```python
-   310|from orgo import OrgoClient
-   311|
-   312|client = OrgoClient(api_key="org_...")
-   313|
-   314|# Create a VM
-   315|vm = client.vms.create(
-   316|    template="ubuntu-desktop",
-   317|    plan="hacker",
-   318|)
-   319|
-   320|# Wait for boot (sub-500ms)
-   321|vm.wait_ready()
-   322|
-   323|# Execute commands
-   324|result = vm.execute("ls -la /home/agent")
-   325|print(result.stdout)
-   326|
-   327|# Run browser automation inside the VM
-   328|vm.execute("playwright test --headed")
-   329|
-   330|# Take screenshot of the desktop
-   331|screenshot = vm.screenshot()
-   332|with open("desktop.png", "wb") as f:
-   333|    f.write(screenshot)
-   334|
-   335|# Transfer files
-   336|vm.upload("script.py", "/home/agent/script.py")
-   337|vm.download("/home/agent/output.csv", "output.csv")
-   338|
-   339|# Clean up
-   340|vm.terminate()
-   341|```
-   342|
-   343|### WebSocket API (Real-time Control)
-   344|
-   345|```python
-   346|import asyncio
-   347|import websockets
-   348|
-   349|async with websockets.connect("wss://api.orgo.ai/v1/vms/{vm_id}/ws") as ws:
-   350|    # Send mouse click
-   351|    await ws.send(json.dumps({"type": "click", "x": 500, "y": 300}))
-   352|
-   353|    # Type text
-   354|    await ws.send(json.dumps({"type": "type", "text": "hello world"}))
-   355|
-   356|    # Receive desktop stream
-   357|    async for msg in ws:
-   358|        frame = json.loads(msg)
-   359|        # frame["screenshot"] = base64 PNG
-   360|```
-   361|
-   362|### Key Features
-   363|
-   364|- **Sub-500ms cold boot** — fastest in the industry, instant agent dispatch
-   365|- **Full Linux desktop** — Xfce/Fluxbox with xdotool for mouse/keyboard control
-   366|- **Firecracker micro-VMs** — hardware-level isolation, secure by default
-   367|- **Double encryption at rest** — rotating credentials per session
-   368|- **File transfer** — upload/download between host and VM
-   369|- **Template system** — pre-built Docker images, custom templates
-   370|- **GPU roadmap** — NVIDIA MIG partitioning on A100, whole-GPU A10/L40s
-   371|- **Multi-model**: Claude Computer Use, OpenAI CUA, OpenClaw, LangChain
-   372|
-   373|### When to Use Orgo Over Browsers
-   374|
-   375|```
-   376|Browser Use Cloud can't do these. Orgo can:
-   377|
-   378|• Install and run desktop software → browsers can't install apps
-   379|• Multi-window workflows → browsers are single-window
-   380|• Local file processing → browsers are sandboxed
-   381|• GPU compute → browsers have no GPU access
-   382|• Full terminal access → browsers have no shell
-   383|• Run Playwright/Selenium locally → full control, no CDP limits
-   384|```
-   385|
-   386|### Open-Source Alternative
-   387|
-   388|There is an open-source clone at `github.com/Julianb233/orgo-clone`:
-   389|- Fastify/PostgreSQL/Drizzle/Dockerode/BullMQ
-   390|- Xvfb/Fluxbox/x11vnc/xdotool for headless desktop
-   391|- Self-hosted with your own Docker infrastructure
-   392|- 85 commits, active development
-   393|
-   394|### Limitations
-   395|
-   396|- **Cost per VM** — $29/mo for 5 VMs means ~$5.80/VM, but only 5 concurrent
-   397|- **Not a browser tool** — you bring your own browser automation (Playwright, Puppeteer)
-   398|- **No built-in stealth** — VMs use standard Linux, no anti-detection out of the box
-   399|- **GPU not yet available** — roadmap, not production
-   400|- **Proprietary** — closed-source SaaS (use the clone for self-hosting)
-   401|
-   402|---
-   403|
-   404|## Decodo Proxy Integration
-   405|
-   406|### Where Decodo Fits
-   407|
-   408|Browser Use Cloud has built-in residential proxies, so Decodo is NOT needed for primary browser automation. Decodo's role in this stack:
-   409|
-   410|1. **Raw HTTP scraping**: curl/requests through residential IPs for API endpoints
-   411|2. **Cost optimization**: $2/GB vs Browser Use Cloud's $5/GB for high-volume data extraction
-   412|3. **Playwright fallback**: When you need full control of the browser stack
-   413|4. **Geo-targeting that Browser Use doesn't support**
-   414|
-   415|### Decodo Proxy Details
-   416|
-   417|```
-   418|Proxy: http://spo2nwl1tw:***@us.decodo.com:10001
-   419|Ports: 10001-10007 (round-robin for IP rotation)
-   420|Type: Residential, sticky 10-minute sessions
-   421|Cost: $2/GB
-   422|```
-   423|
-   424|### Usage Patterns
-   425|
-   426|#### Pattern 1: curl + Decodo
-   427|
-   428|```bash
-   429|curl -x "http://spo2nwl1tw:***@us.decodo.com:10001" \
-   430|  "https://api.target.com/data" \
-   431|  -H "User-Agent: Mozilla/5.0 ..."
-   432|```
-   433|
-   434|#### Pattern 2: Python requests + Decodo
-   435|
-   436|```python
-   437|import requests
-   438|
-   439|proxies = {
-   440|    "http": "http://spo2nwl1tw:***@us.decodo.com:10001",
-   441|    "https": "http://spo2nwl1tw:***@us.decodo.com:10001",
-   442|}
-   443|resp = requests.get("https://api.target.com/data", proxies=proxies)
-   444|```
-   445|
-   446|#### Pattern 3: Playwright + Decodo + Stealth
-   447|
-   448|```python
-   449|from playwright.async_api import async_playwright
-   450|
-   451|async with async_playwright() as p:
-   452|    browser = await p.chromium.launch(
-   453|        headless=True,
-   454|        proxy={
-   455|            "server": "http://us.decodo.com:10001",
-   456|            "username": "spo2nwl1tw",
-   457|            "password": "***",
-   458|        }
-   459|    )
-   460|    context = await browser.new_context(
-   461|        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
-   462|        viewport={"width": 1920, "height": 1080},
-   463|    )
-   464|    page = await context.new_page()
-   465|    await page.goto("https://target.com")
-   466|```
-   467|
-   468|**Warning**: Playwright + Decodo + playwright-stealth was tested against Facebook Ad Library and **failed** — Facebook's headless detection still blocks it. Use Browser Use Cloud for Meta.
-   469|
-   470|#### Pattern 4: Browser Use open-source + Decodo
-   471|
-   472|The open-source `browser-use` library has **no built-in stealth**. To use Decodo with it:
-   473|
-   474|```python
-   475|from browser_use import Agent, Browser, BrowserConfig
-   476|
-   477|browser = Browser(
-   478|    config=BrowserConfig(
-   479|        headless=False,  # Non-headless reduces detection
-   480|        proxy={
-   481|            "server": "http://us.decodo.com:10001",
-   482|            "username": "spo2nwl1tw",
-   483|            "password": "***",
-   484|        }
-   485|    )
-   486|)
-   487|
-   488|agent = Agent(
-   489|    task="Extract data from...",
-   490|    llm_provider="anthropic",
-   491|    llm_model="claude-sonnet-4-6",
-   492|    browser=browser,
-   493|)
-   494|result = await agent.run()
-   495|```
-   496|
-   497|**Warning**: This will NOT bypass advanced anti-bot detection (Cloudflare, Facebook). For those, use Browser Use Cloud.
-   498|
-   499|---
-   500|
-   501|
+---
+name: super-browser
+description: Universal browser and computer automation skill. Use when an agent needs to plan, route, execute, or verify browser automation, authenticated browsing, anti-bot workflows, raw HTTP/proxy fetching, or full desktop computer-use tasks with Super Browser.
+---
+
+# Super Browser
+
+Super Browser is now plugin-first. Prefer the role skills in `skills/` and the CLI/MCP runtime.
+
+## Quick Start
+
+```bash
+./scripts/super-browser doctor
+./scripts/super-browser providers
+./scripts/super-browser install-skill --target ~/.codex/skills
+./scripts/super-browser init-mcp
+./scripts/super-browser plan --goal "Extract product names from https://example.com"
+./scripts/super-browser plan --goal "Extract public data" --allow-provider playwright --max-cost-usd 0
+./scripts/super-browser run --goal "Fetch a slow endpoint" --url "https://example.com/data.json" --timeout-seconds 60
+./scripts/super-browser run --goal "Draft a LinkedIn comment but do not publish"
+./scripts/super-browser approve <run-id> --by human --reason "approved exact action"
+./scripts/super-browser get <run-id>
+./scripts/super-browser handoff <run-id>
+./scripts/super-browser runs --status awaiting_approval --limit 20
+./scripts/super-browser resume <run-id>
+./scripts/super-browser verify <run-id>
+./scripts/super-browser live-test --provider local
+./scripts/verify-super-browser
+```
+
+CLI commands return JSON on success and redacted stderr JSON with `error` and `error_type` for known Super Browser command failures. MCP tools advertise `inputSchema` plus read-only/execution annotations, validate required fields, provider enums, cost ceilings, timeout ceilings, booleans, setup paths, non-blank string fields, and unknown arguments before execution, and return `structuredContent` for direct JSON consumption. Use `install_super_browser_skill` and `init_super_browser_mcp` when an MCP-only agent needs to install the bundle or generate config without shelling out to the CLI.
+
+Treat `approve_browser_run` and `resume_browser_run` as execution-capable tools. Their MCP annotations are conservative because `approve_browser_run` with `execute=true` and `resume_browser_run` after approval can dispatch a provider action.
+
+Recoverable tool errors and unexpected exceptions inside known tools return `isError: true` with redacted structured error details and `error_type`; unknown tools, unsupported protocol methods, malformed `resources/read` envelopes, malformed JSON, and non-object JSON-RPC requests remain protocol errors. Well-formed JSON-RPC notifications without an `id`, including `notifications/initialized`, are consumed without a response. Malformed or non-object requests return a `null` id and must not reuse an earlier request id.
+
+Use MCP `resources/list` and `resources/read` to load read-only provider docs and playbooks when the agent does not have filesystem access. Stable resource URIs include `super-browser://references/provider-matrix`, `super-browser://references/routing-playbook`, and `super-browser://skills/<skill-name>`. Resource docs are exposed only from a verified Super Browser repository, installed bundle root, or packaged `share/super-browser` asset tree, never from an arbitrary MCP current working directory.
+
+Use `./scripts/super-browser install-skill --target <skill-root>` to copy a self-contained Super Browser bundle for another agent; add `--force` to replace an older bundle cleanly. Installed bundles exclude local-only secrets, state, caches, dependency folders, logs, sqlite files, symlinks, and build output. Use `./scripts/super-browser init-mcp --path <config.json> --merge` to add Super Browser to an existing MCP config without dropping other servers. `init-mcp --cwd` must point to this repo or an installed bundle with an executable `mcp/super-browser-server`; invalid paths fail before config files are written. If `super-browser` is running from a normal Python package install, `init-mcp` emits a module-based MCP command and points `SUPER_BROWSER_REPO_ROOT` to the packaged `share/super-browser` asset tree so `install-skill` and MCP markdown resources still work. If a broken/minimal package omits the asset tree, `install-skill` reports `source_unavailable`.
+
+Use `./scripts/verify-super-browser` as the default full local verification entrypoint before claiming the repo or a change is ready. It uses temporary `SUPER_BROWSER_STATE_DIR` and `PYTHONPYCACHEPREFIX` values by default so verification does not leave `.super-browser` or `__pycache__` files in the repo. Set `SUPER_BROWSER_VERIFY_TMP_DIR`, `SUPER_BROWSER_VERIFY_STATE_DIR`, or `SUPER_BROWSER_VERIFY_PYCACHE_DIR` only when debugging and you need to keep those artifacts.
+
+## Agent Roles
+
+- `super-browser-orchestrator`: Owns the workflow end to end.
+- `super-browser-planner`: Chooses providers and builds the execution plan.
+- Provider specialists: Give tool-specific setup, limits, and verification guidance.
+- `publishing-safety-specialist`: Gates external writes.
+- `super-browser-verifier`: Checks traces, artifacts, and confidence.
+
+## Approval Lifecycle
+
+External writes and credential-bearing tasks create a run in `awaiting_approval`.
+
+External writes include posting, commenting, replying/responding, sending email, sending messages/DMs, submitting non-search/state-changing forms, uploading, liking/reacting/upvoting/downvoting, quote/repost/share-to-story actions, starring/watching/forking repos, bookmarking/saving/pinning/favoriting platform content, following/connecting, joining/creating groups, creating events/pages, accepting/declining/removing/canceling/confirming requests, invites, or connections, removing followers/friends/members, RSVPs, event attendance/check-ins/interested/going marks, reporting/blocking/muting, notification toggles, message/email archive/read-state changes, tagging/mentioning people, booking/scheduling/reserving, requesting info/demo/quotes/pricing, applying, subscribing, reviews, poll votes, CRM lead/contact/customer create/assign/enroll/stage/list updates, project/repository issue, ticket, task, card, pull-request, and repo changes, cloud file/folder/document creation, renames, moves, copies, sharing/access/permission/public-visibility changes, app/integration install/authorize/connect changes, settings/preference saves, API-key/token creation, rotation, or revocation, secret reveal/copy requests, webhook creation or updates, deployment creation, promotion, rollback, or redeploys, DNS record/nameserver changes, environment-variable changes, billing trial/plan/payment-method changes, trading orders, asset sales, swaps, staking, unstaking, position opens/closes/liquidations, withdrawals, deposits, fund transfers, ACH/wire/bank transfers, bank/wallet/brokerage/payout account changes, legal signatures/certifications/attestations, tax and court filings, insurance claim/policy changes, benefits or health-plan enrollment changes, prescription refills, medical form/record delivery, passport/visa/government-ID actions, voter registration, regulated address changes, emergency contact changes, workspace/channel/server/community/page creation, rename, archive, or unarchive changes, member additions, kicks, bans, unbans, role changes, thread/comment locks, ad creation/boosting/promotion, cart/basket/bag/wishlist/waitlist additions, removals, or quantity changes, checkout address changes, promo/coupon/offer actions, order placement/cancellation/returns/refunds/payments, purchases/bids/donations/checkouts, profile/account changes, destructive account actions, and clicking/tapping/pressing/selecting/activating final write buttons or controls.
+
+Treat undo/removal wording as external write wording too: unlike, unreact, unbookmark, unsave, unfavorite, unstar, stop watching, trash/restore cloud files, cancel/reschedule calendar events, cancel scheduled posts/messages/emails, remove CRM records from campaigns or sequences, and unenroll contacts.
+
+Draft-only text preparation does not require approval when the request explicitly says not to publish, post, comment, reply, respond, message/DM, send, or submit. The provider prompt must derive the draft-only boundary from current policy classification, not only from mutable stored plan flags, and must still tell the browser agent to stop before any final publish, post, comment, reply, respond, message/DM, send, submit, upload, follow, connect, react, share, CRM/cart/order/payment/trading/banking/payout/legal/government/health/insurance/identity/project/repository/cloud-file/sharing/integration/settings/secrets/infrastructure/billing/workspace/channel/role/moderation/notification/message-state/member/account change, click, tap, press, select, or activate control. Hyphenated content terms such as "follow-up" do not count as the platform action "follow" unless the request actually asks for a follow/following action. Business/content phrases such as "lead magnet," "invite template," "posting schedule," "apply a filter," "book notes," or "review summary" stay non-external unless the request also asks for a real site/account state change. Public documentation, help articles, guides, policy pages, best-practice pages, examples, and local notes about sharing, OAuth, tokens, auth, integrations, API keys, webhooks, DNS records, environment variables, billing, trading, banking, ACH/wire transfers, payouts, legal forms, tax filing, insurance claims, prescriptions, medical records, passports, visas, government IDs, channels, workspaces, roles, or moderation stay read-only when the full request stays reference-only. Creating local lead/contact/prospect/customer lists, CSVs, JSON files, or run artifacts from extracted data is local output, not an external write; writing or syncing those records into CRM, Salesforce, HubSpot, Pipedrive, Zoho, Apollo, campaigns, sequences, or pipelines remains approval-gated. File uploads, credential-bearing work, and ambiguous "draft and post" or "write and send" requests still require approval.
+
+Read-only scanning of visible public posts, comments, forum messages, and group content is allowed as a read task only when the full request stays read-only. Reading personal inboxes, DMs, or private messages is credential-bearing and requires approval. A browse/read/search/list prefix does not neutralize a later write: scanning plus posting, commenting, replying, responding, sending, liking, following, connecting, submitting, CRM updates, cart/order/payment/trading/banking/payout changes, legal/government/health/insurance/identity changes, project/repository updates, cloud-file/sharing/integration/settings changes, secret/API-key changes, webhook/deployment/DNS/environment-variable changes, billing/payment-method changes, workspace/channel/role/moderation changes, thread locks, notification toggles, archive/read-state changes, member removals, or pressing final write controls remains approval-gated.
+
+Submitting public search, filter, or sort forms only to fetch visible public results is read-only when the query does not include credentials, private/personal data, or another external action. Public documentation, help articles, guides, policy pages, best-practice pages, examples, and local notes about sharing, OAuth, tokens, auth, integrations, API keys, webhooks, DNS records, environment variables, billing, trading, banking, ACH/wire transfers, payouts, legal forms, tax filing, insurance claims, prescriptions, medical records, passports, visas, government IDs, channels, workspaces, roles, or moderation are also read-only when the full request stays reference-only. These exceptions do not cover a later like, save, bookmark, share, follow, connect, CRM update, cart/order/payment/trading/banking/payout change, legal/government/health/insurance/identity change, project/repository update, cloud-file/sharing/integration/settings change, secret/API-key change, webhook/deployment/DNS/environment-variable change, billing/payment-method change, workspace/channel/role/moderation change, notification toggle, message/email state change, or other external write in the same request. Lead, contact, application, checkout, signup, comment, message, quote, demo, pricing, upload, payment, registration, review, poll, booking, appointment, reservation, subscribe, and unsubscribe forms remain approval-gated.
+
+Local delivery wording such as "send me a summary" or "send us the report" is read-only only when it is not combined with an external action. A mixed request like "send me the findings, then post a comment" or "send me a summary and email this lead" is still an external write and stops for approval.
+
+Use `super-browser approve <run-id> --by <actor> --reason <audit-note>` or `approve_browser_run` with `by` and `reason` to record approval. The actor and reason are required for auditability. Approval does not execute by default; pass `--execute` or MCP `execute=true` only when the exact external action is approved.
+
+Use `super-browser deny <run-id> --by <actor> --reason <audit-note>` or `deny_browser_run` with `by` and `reason` to record denial and prove the write was stopped.
+
+The low-level `execute_plan()` adapter path is guarded too. It re-checks task policy and blocks approval-gated plans unless the durable runtime passes structured `approval_context` after approval is recorded. A bare approval boolean is not enough.
+
+Approval requests include an approval id, required approval stage, action fingerprint, and plan fingerprint. `approve` must reject the pending approval if the id/stage is missing or either fingerprint no longer matches the current run plan, and execution must compare the current plan to the fingerprint stored on the approved record. If approved decision metadata is missing or an approved external-write attempt has already started, `resume` must stop before provider dispatch; retries must create a fresh `provider_retry` approval request instead of retrying the post/comment/message/form submission. Retry protection must derive write risk from policy classification as well as stored flags, so stale or hand-built run records cannot skip duplicate-write protection by setting `task.external_write=false`.
+
+Approved runs expire before provider execution after the approval freshness window. The default is 30 minutes and can be tuned with `SUPER_BROWSER_APPROVAL_TTL_SECONDS`. When an approved run is resumed after expiry, resume is safe only as a state transition: it must record `approval_expired`, return to `awaiting_approval`, create a fresh pending approval for the same stage, and set handoff `resume.will_execute_provider=false`.
+
+Provider prompts must include the current policy boundary for read-only, authenticated read/navigation, draft-only, and external-write runs. Prompt safety is a provider-control layer only; never treat it as a substitute for durable approval records, adapter/runtime guards, target-scope checks, duplicate-write retry protection, verifier policy guards, or handoff approval-integrity checks.
+
+## Resume Lifecycle
+
+Use `super-browser get <run-id>` or `get_browser_run` for read-only lookup. Use `super-browser handoff <run-id>` or `handoff_browser_run` when another agent needs the compact run summary, route, provider readiness, approval state, verifier summary, commands, docs, and next steps. Handoff safety and durability fields such as `task.external_write`, `task.requires_auth`, `task.draft_only`, `task.long_running`, `route.approval_required`, and `approval.required` must come from verifier `policy_guard`, not only from mutable stored plan flags. Use `super-browser runs --status <status> --limit 20` or `list_browser_runs` when an agent needs to discover saved runs after compaction, handoff, or a lost run id. Run lists are compact summaries by default; use CLI `--details` or MCP `include_details=true` only when the full payload list is needed. Empty lookup/list calls do not create `.super-browser` state. If a stored run payload cannot be decoded, lookup/list should surface `store_payload_corrupt` as a low-confidence failed record; resume must block before provider dispatch, and the agent should create a new run instead of treating it as a provider failure.
+
+Use `super-browser resume <run-id>` or `resume_browser_run` to continue a planned, approved, blocked, failed, or stale executing run. Resume does not bypass approval; `awaiting_approval` runs stay stopped until approval is recorded. Execution is atomically claimed so concurrent agents do not start the same run twice. Active executing runs stay no-ops while their execution lease is valid, and the no-op is saved without clearing the lease. Expired leases are recovered and resumed. Lease duration derives long-running status from current policy classification as well as the stored flag, so stale `task.long_running=false` cannot shorten a monitor/overnight/recurring run's duplicate-worker guard. Terminal provider results clear the lease. In handoff output, inspect both `resume.safe_to_resume` and `resume.will_execute_provider`; after a failed approved external write, resume is safe because it creates a fresh retry approval, but it must not start another provider attempt until that retry approval is approved. If `plan_integrity` is `mismatch` or `missing`, verifier failures include `missing_run_report`, `missing_artifact_path`, `artifact_hash_mismatch`, `status_mismatch`, impossible final-provider/attempt evidence, provider sequence constraints fail, `approval_integrity` is `missing`, `mismatch`, `missing_fingerprint`, `missing_approval_id`, `missing_required_before`, `invalid_required_before`, `missing_decision_metadata`, or `unknown_status`, or `policy_guard.non_resumable_safety_stop=true`, handoff must mark resume unsafe and direct resume must stop with `resume_blocked` before any execution claim. `missing_run_report` is allowed only for stale execution recovery before the recovered attempt runs, or for the non-executing transition that creates a fresh external-write retry approval.
+
+## Routing Defaults
+
+- Local Playwright for simple deterministic tasks.
+- Browserbase/Stagehand for general cloud browser workflows.
+- Browser Use for anti-bot and hard browser tasks.
+- Rtrvr for logged-in local Chrome sessions.
+- Orgo for full desktop/computer use.
+- Decodo for raw HTTP and cheap residential proxy fetches when the task includes an `http://` or `https://` endpoint.
+- Hyperbrowser, Steel, Browserless, and Airtop are evaluating providers until live tests pass for a task class.
+
+## Council Reports
+
+Every `super-browser plan` result includes `council_report`. Use it to inspect provider specialist recommendations, required setup, missing env vars, review loops, approval gates, and the selected provider sequence before execution.
+
+Use `--allow-provider` for strict provider allowlists, `--max-cost-usd` for cost-floor routing, and `--timeout-seconds` for a provider execution ceiling. Planning fails if no provider satisfies the constraints. The planner avoids URL-required providers when no starting URL is available. Raw HTTP/API tasks require a concrete `http://` or `https://` starting URL; if the endpoint is missing, planning fails instead of silently switching to a browser provider. URLs embedded in prose or Markdown goals have common trailing delimiters stripped, including `>`, `]`, quotes, and sentence punctuation; explicit URLs with raw whitespace are rejected and should use percent encoding. Runtime execution, verifier, handoff, and direct resume re-check task payload validity, URL-derived target scope, provider allowlists, file-URL provider restrictions, unknown providers, URL-required primary providers without a starting URL, raw HTTP without an HTTP endpoint, and max-cost ceilings before provider dispatch, so a stale or hand-built plan cannot smuggle malformed constraints, downgrade a sensitive target scope, or widen the selected sequence. Inspect `cost_estimate`, `task.timeout_seconds`, and `council_report.planner_decision.timeout_seconds` before execution.
+
+Use `super-browser doctor` or `browser_doctor` before live/provider execution. Treat `usable_now` as "can be attempted." Treat `production_ready` as scoped, not blanket certification: inspect `production_ready_scope`, `certified_workflow_classes`, `uncertified_workflow_classes`, `production_blockers`, and `latest_live_test.workflow_class` before relying on a provider for a task class. `live_test_passed` means fresh persisted evidence exists for the listed workflow class or classes; it does not prove social posting, authenticated, anti-bot, or desktop workflows unless that class is listed. `runtime_missing` means a local package exists but the browser runtime cannot launch; for Playwright, run `playwright install chromium` before claiming local readiness. `requires_live_test_before_production=true` means setup exists but production proof is missing. `requires_live_test_before_broader_production=true` means one class is proven but another supported class is still unproven. `live_test_stale` means rerun the provider live test. `decodo-http` can be `usable_direct_http_no_proxy`, which means direct raw HTTP can run for a supplied HTTP endpoint but residential proxy routing still needs `DECODO_PROXY`.
+
+Use `super-browser production-readiness` or MCP `production_readiness` as the final go-live gate. It returns `production_ready=false` and CLI exit `1` when required providers are missing env vars, have stale or missing live evidence, or still have uncertified workflow classes. Do not claim production readiness when this gate is blocked.
+
+Use `super-browser env-checklist` or MCP `env_checklist` before setup handoff or paid/provider execution. It reports required and optional env var names, configured/missing status, provider mapping, global runtime knobs such as `SUPER_BROWSER_APPROVAL_TTL_SECONDS`, and live-test commands without exposing secret values.
+
+Use `super-browser bundle-manifest` or MCP `bundle_manifest` before handing Super Browser to another agent, auditing an installed bundle, or preparing a release. The manifest is the authoritative hashed inventory of bundle files, entrypoints, specialist skills, providers, MCP tools, and docs resources. Installed bundles include `super-browser-manifest.json`.
+
+Optional provider transport overrides such as `RTRVR_API_BASE`, `ORGO_API_BASE`, `AIRTOP_API_BASE`, `HYPERBROWSER_API_BASE`, `BROWSERLESS_BASE_URL`, and `STEEL_CDP_URL` are inspected before credentials are sent. Loopback self-hosted providers may use HTTP/WS. Private-network or link-local provider endpoints require `SUPER_BROWSER_ALLOW_INTERNAL_PROVIDER_BASES=1`, and insecure non-loopback HTTP/WS requires `SUPER_BROWSER_ALLOW_INSECURE_PROVIDER_BASES=1`.
+
+Request a specific class with `super-browser live-test --provider <provider> --workflow-class <class>` or MCP `run_browser_live_tests` with `workflow_class`. Supported classes accumulate per provider, so a later `external_write_gate` proof does not erase an earlier `raw_http_direct`, `general_read`, `authenticated_read`, or `desktop_read` proof. `skipped` means no provider execution happened and does not erase an existing class proof; `failed` replaces that class record and removes certification. Unsupported provider/class pairs return `unsupported_workflow_class=true` and do not overwrite previous evidence.
+
+Use `super-browser live-test --provider fixtures` to run local browser fixtures for login, infinite scroll, draft-only forms, social feed scanning plus comment drafting without publishing, lead-generation extraction to local output without CRM/email actions, modal handling, upload selection, blocked pages, and resume recovery.
+
+Use `workflow_class=external_write_gate` to prove a provider-locked post/comment-style task stops in `awaiting_approval` before any provider execution starts. This is a safety-gate proof; it does not approve or execute a real external write.
+
+## Execution Reports
+
+Normal runs execute the primary provider and then planned fallbacks until one succeeds or all stop. If an adapter raises unexpectedly, treat it as a redacted failed provider attempt with `provider-exception.json` metadata; fallback providers may still run. If the runtime execution boundary raises after a run is claimed, treat `runtime-exception.json` plus the failed `run-report.json` as execution evidence; the lease should be cleared and external-write retry approval gates still apply. Inspect `run-report.json` or `super-browser verify <run-id>` to see every provider attempt, blocked reason, selected provider, artifact manifest, timeout checks, cost estimate, `plan_sha256`, and confidence.
+
+`super-browser verify <run-id>` actively checks artifact paths, SHA-256 hashes, the run-report plan fingerprint, provider sequence constraints, final-provider/attempt consistency, approval id/stage/fingerprint/decision integrity, and `run-report.json`, reports provider cost band and trace links, lists failures, and writes `verification-report.json` when a report directory exists. Inspect `plan_integrity` before trusting artifacts; a mismatch means the stored run plan and run report do not match. Handoff and direct resume treat `plan_integrity.status=mismatch` or `missing`, verifier failures `missing_run_report`, `missing_artifact_path`, `artifact_hash_mismatch`, `status_mismatch`, impossible final-provider/attempt evidence, provider constraint failures, and `approval_integrity.status=missing`, `mismatch`, `missing_fingerprint`, `missing_approval_id`, `missing_required_before`, `invalid_required_before`, `missing_decision_metadata`, or `unknown_status` as unsafe to resume. Inspect `approval_integrity` before resuming approved runs; a mismatch means the approved action no longer matches the current plan. Inspect `policy_guard` for target scope, approval state, safety events, blocked reasons, and duplicate-write retry state before trusting or retrying a run.
+
+Use `super-browser handoff <run-id>` or `handoff_browser_run` when another agent needs the same verifier policy guard and approval integrity in a compact, read-only package. Treat `approval_status=missing` or `approval_integrity.status=mismatch` as a broken approval-gate record, not as permission to run.
+
+In `write_retry_guard`, `fresh_retry_approval_required=true` means an approved external-write attempt already started and the next resume must create a `provider_retry` approval before any provider can try the write again.
+
+Agent-facing CLI/MCP output, saved reports, raw HTTP text/JSON bodies, provider output JSON, and page text artifacts redact cookies, authorization headers, API keys, bearer tokens, token query parameters, passwords, and client secrets. Provider session IDs stay visible when they are needed for debugging. Binary raw HTTP bodies are preserved with metadata.
+
+Do not place credentials in a URL. Super Browser rejects starting URLs with embedded username/password credentials, and redaction strips URL userinfo if a provider returns it in logs or artifacts.
+
+Use local `file://` URLs only with Playwright/local fixtures. Super Browser extracts local file URLs from either the explicit URL field or the goal text, will not route them to cloud providers or raw HTTP, and runtime provider-sequence checks block stale or hand-built file-URL plans before provider dispatch. Raw HTTP supports only `http://` and `https://` and must include that endpoint during planning. `local_file` targets require approval because they can expose machine data.
+
+Inspect `target_scope` in every plan. `loopback`, `private_network`, `link_local`, and `local_file` are not ordinary public-web targets and are routed through council mode for explicit review. `private_network`, `link_local`, and `local_file` targets require approval before execution; `loopback` stays available for local fixtures and development tests.
+
+Raw HTTP redirects are target-scope checked before they are followed. A redirect into `loopback`, `private_network`, `link_local`, or `local_file` is blocked unless the run was originally planned for that same scope.
+
+Playwright-backed browser adapters target-scope check browser requests before navigation can complete. Local Playwright, Browserbase/Stagehand CDP, and Steel CDP block redirects or subresources into sensitive scopes unless the run was planned for that scope. Treat `browser_request_target_scope` as a safety stop and inspect its metadata before replanning.
+
+Raw HTTP, URL-capable remote/desktop providers, and Playwright-backed browser guards also resolve `public_web` hostnames at execution time. If DNS resolution returns loopback, private-network, or link-local addresses, or local DNS resolution fails and the target cannot be verified, stop and replan for the real target scope instead of retrying the public-web run. Treat `provider_url_resolved_target_scope` as a remote/desktop-provider safety stop before the URL was sent to the provider. Target-scope and DNS safety stops are non-resumable; create a new run or replan instead of calling resume on the blocked run.
+
+## References
+
+- `references/provider-matrix.md`
+- `references/routing-playbook.md`
+- `references/cost-model.md`
+- `references/security-and-approval-policy.md`
+- `references/live-test-matrix.md`

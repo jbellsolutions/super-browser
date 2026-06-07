@@ -1,0 +1,182 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from .bundle import build_bundle_manifest, write_bundle_manifest
+from .env_checklist import environment_checklist
+from .models import RUN_STATUS_VALUES
+from .production import production_readiness
+from .providers import PROVIDERS, list_providers, provider_readiness
+from .redaction import redact_text, safe_json_dumps
+from .router import build_plan, infer_task
+from .runtime import approve_run, create_run, deny_run, resume_run
+from .setup_helpers import install_skill_bundle, mcp_config, write_mcp_config
+from .store import RunStore
+from .handoff import build_handoff
+from .live_tests import WORKFLOW_CLASSES, run_live_tests
+from .verifier import verify_run
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="super-browser", description="Plan and route browser/computer automation tasks.")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    plan_p = sub.add_parser("plan", help="Plan a browser automation task.")
+    plan_p.add_argument("--goal", required=True)
+    plan_p.add_argument("--url")
+    plan_p.add_argument("--optimize", choices=["balanced", "cost", "reliability"], default="balanced")
+    plan_p.add_argument("--allow-provider", action="append", choices=list(PROVIDERS.keys()), default=[])
+    plan_p.add_argument("--max-cost-usd", type=float)
+    plan_p.add_argument("--timeout-seconds", type=_positive_int)
+
+    run_p = sub.add_parser("run", help="Create and execute a durable browser automation run when policy allows.")
+    run_p.add_argument("--goal", required=True)
+    run_p.add_argument("--url")
+    run_p.add_argument("--optimize", choices=["balanced", "cost", "reliability"], default="balanced")
+    run_p.add_argument("--allow-provider", action="append", choices=list(PROVIDERS.keys()), default=[])
+    run_p.add_argument("--max-cost-usd", type=float)
+    run_p.add_argument("--timeout-seconds", type=_positive_int)
+    run_p.add_argument("--plan-only", action="store_true", help="Create the durable run plan without executing the provider.")
+
+    resume_p = sub.add_parser("resume", help="Resume a planned, approved, blocked, or failed run when policy allows.")
+    resume_p.add_argument("run_id")
+
+    get_p = sub.add_parser("get", help="Return a saved run by id without executing it.")
+    get_p.add_argument("run_id")
+
+    handoff_p = sub.add_parser("handoff", help="Return a compact handoff package for another agent.")
+    handoff_p.add_argument("run_id")
+
+    runs_p = sub.add_parser("runs", aliases=["list-runs"], help="List saved runs without executing them.")
+    runs_p.add_argument("--status", choices=RUN_STATUS_VALUES)
+    runs_p.add_argument("--limit", type=_positive_int, default=20)
+    runs_p.add_argument("--details", action="store_true", help="Include full run payloads instead of compact summaries.")
+
+    verify_p = sub.add_parser("verify", help="Verify a run report.")
+    verify_p.add_argument("run_id")
+
+    approve_p = sub.add_parser("approve", help="Approve a run that is awaiting approval.")
+    approve_p.add_argument("run_id")
+    approve_p.add_argument("--by", default="user")
+    approve_p.add_argument("--reason", required=True)
+    approve_p.add_argument("--execute", action="store_true", help="Execute the provider immediately after recording approval.")
+
+    deny_p = sub.add_parser("deny", help="Deny a run that is awaiting approval.")
+    deny_p.add_argument("run_id")
+    deny_p.add_argument("--by", default="user")
+    deny_p.add_argument("--reason", required=True)
+
+    sub.add_parser("providers", help="List known browser/computer providers.")
+    sub.add_parser("doctor", help="Check provider environment readiness.")
+    prod_p = sub.add_parser("production-readiness", help="Fail unless required providers have production-ready live evidence.")
+    prod_p.add_argument("--require-provider", action="append", choices=list(PROVIDERS.keys()), default=[])
+    manifest_p = sub.add_parser("bundle-manifest", help="Print or write a hashed Super Browser handoff manifest.")
+    manifest_p.add_argument("--root", help="Repository or installed bundle root to inspect.")
+    manifest_p.add_argument("--path", help="Write manifest JSON to this path instead of only printing it.")
+    sub.add_parser("env-checklist", help="Print required and optional Super Browser environment variables without values.")
+    live_p = sub.add_parser("live-test", help="Run gated local/provider live tests.")
+    live_p.add_argument("--provider", choices=["local", "fixtures", "all", *PROVIDERS.keys()], default="local")
+    live_p.add_argument("--workflow-class", choices=list(WORKFLOW_CLASSES), default="default")
+    install_p = sub.add_parser("install-skill", help="Install a self-contained Super Browser skill/plugin bundle.")
+    install_p.add_argument("--target", help="Directory that should receive the super-browser bundle.")
+    install_p.add_argument("--name", default="super-browser", help="Installed bundle directory name.")
+    install_p.add_argument("--force", action="store_true", help="Update an existing bundle in place.")
+
+    init_mcp_p = sub.add_parser("init-mcp", help="Print or write MCP server config.")
+    init_mcp_p.add_argument("--path", help="Write MCP config JSON to this file instead of only printing it.")
+    init_mcp_p.add_argument("--cwd", help="Repository or installed bundle path for the MCP server.")
+    init_mcp_p.add_argument("--force", action="store_true", help="Overwrite an existing MCP config file.")
+    init_mcp_p.add_argument("--merge", action="store_true", help="Merge super-browser into an existing MCP config without removing other servers.")
+
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "providers":
+            return _print(list_providers())
+        if args.command == "doctor":
+            return _print({"providers": provider_readiness()})
+        if args.command == "production-readiness":
+            payload = production_readiness(required_providers=args.require_provider or None)
+            _print(payload)
+            return 0 if payload["production_ready"] else 1
+        if args.command == "bundle-manifest":
+            if args.path:
+                return _print(write_bundle_manifest(root=args.root, path=args.path))
+            return _print(build_bundle_manifest(root=args.root))
+        if args.command == "env-checklist":
+            return _print(environment_checklist())
+        if args.command == "live-test":
+            return _print(run_live_tests(args.provider, workflow_class=args.workflow_class))
+        if args.command == "plan":
+            task = infer_task(
+                args.goal,
+                url=args.url,
+                optimize=args.optimize,
+                providers_allowed=args.allow_provider,
+                max_cost_usd=args.max_cost_usd,
+                timeout_seconds=args.timeout_seconds,
+            )
+            return _print(build_plan(task).to_dict())
+        if args.command == "run":
+            run = create_run(
+                args.goal,
+                url=args.url,
+                optimize=args.optimize,
+                execute=not args.plan_only,
+                providers_allowed=args.allow_provider,
+                max_cost_usd=args.max_cost_usd,
+                timeout_seconds=args.timeout_seconds,
+            )
+            return _print(run.to_dict())
+        if args.command == "resume":
+            return _print(resume_run(args.run_id).to_dict())
+        if args.command == "get":
+            run = RunStore(create=False).get(args.run_id)
+            if not run:
+                return _error(f"Run not found: {args.run_id}")
+            return _print(run)
+        if args.command == "handoff":
+            return _print(build_handoff(args.run_id))
+        if args.command in ("runs", "list-runs"):
+            return _print(RunStore(create=False).list(status=args.status, limit=args.limit, include_details=args.details))
+        if args.command == "verify":
+            return _print(verify_run(args.run_id))
+        if args.command == "approve":
+            return _print(approve_run(args.run_id, approver=args.by, reason=args.reason, execute=args.execute).to_dict())
+        if args.command == "deny":
+            return _print(deny_run(args.run_id, denied_by=args.by, reason=args.reason).to_dict())
+        if args.command == "install-skill":
+            return _print(install_skill_bundle(args.target, name=args.name, force=args.force))
+        if args.command == "init-mcp":
+            if args.path:
+                return _print(write_mcp_config(args.path, force=args.force, merge=args.merge, cwd=args.cwd))
+            return _print(mcp_config(cwd=args.cwd))
+        return _error("Unknown command")
+    except Exception as exc:
+        return _error_from_exception(exc)
+
+
+def _print(payload: object) -> int:
+    print(safe_json_dumps(payload))
+    return 0
+
+
+def _error(message: str, *, error_type: str = "ValueError") -> int:
+    print(json.dumps({"error": redact_text(message), "error_type": error_type}), file=sys.stderr)
+    return 1
+
+
+def _error_from_exception(exc: Exception) -> int:
+    return _error(str(exc), error_type=exc.__class__.__name__)
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

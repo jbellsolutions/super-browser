@@ -1,0 +1,41 @@
+{
+  "name": "super-browser",
+  "version": "0.3.0",
+  "description": "Universal browser and computer automation plugin for agents. Includes specialist skills, a routing CLI, and an MCP server for choosing the right browser, proxy, authenticated session, or desktop backend.",
+  "author": {
+    "name": "AI Integraterz",
+    "url": "https://github.com/jbellsolutions"
+  },
+  "homepage": "https://github.com/jbellsolutions/super-browser",
+  "repository": "https://github.com/jbellsolutions/super-browser",
+  "license": "MIT",
+  "keywords": [
+    "browser",
+    "automation",
+    "agents",
+    "mcp",
+    "computer-use",
+    "playwright"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Super Browser",
+    "shortDescription": "Route agent browser and computer automation to the right tool.",
+    "longDescription": "Super Browser gives agents a documented plugin, CLI, and MCP interface for browser automation. It routes simple tasks to local Playwright, cloud browser work to Browserbase or Browser Use, logged-in sessions to Rtrvr, raw HTTP to Decodo, and full desktop work to Orgo, with specialist skills and approval policy for external writes.",
+    "developerName": "AI Integraterz",
+    "category": "Engineering",
+    "capabilities": ["Read", "Write", "Interactive"],
+    "websiteURL": "https://github.com/jbellsolutions/super-browser",
+    "privacyPolicyURL": "https://github.com/jbellsolutions/super-browser",
+    "termsOfServiceURL": "https://github.com/jbellsolutions/super-browser",
+    "defaultPrompt": [
+      "Plan this browser automation task",
+      "Choose the best browser tool",
+      "Verify this browser workflow"
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}
+
