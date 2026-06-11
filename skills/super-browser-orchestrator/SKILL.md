@@ -11,6 +11,7 @@ Own the whole job. Convert the user request into a safe, executable browser/comp
 
 ## Workflow
 
+0. On first use or when setup is unclear, call `super-browser setup` or MCP `setup_walkthrough`, then `env_checklist` / `browser_doctor`. Use signup URLs from the walkthrough; never ask the user to paste secrets in chat.
 1. Classify the task as read-only, mutating, external write, credential-bearing, destructive, long-running, authenticated, anti-bot, desktop, or raw HTTP.
 2. Call `super-browser plan --goal "<goal>"` or the `plan_browser_task` MCP tool.
 3. Read `council_report`; if the plan mode is `council`, review the specialist recommendations and three critique loops before execution.
@@ -25,9 +26,9 @@ Own the whole job. Convert the user request into a safe, executable browser/comp
 
 - Prefer the cheapest reliable tool, not the cheapest tool blindly.
 - Use local Playwright for simple deterministic work.
-- Use Browserbase/Stagehand for general cloud browser work.
-- Use Browser Use for high-risk anti-bot workflows.
-- Use Rtrvr for logged-in local Chrome sessions.
+- Use Browser Use for high-risk anti-bot workflows and logged-in cloud profiles.
+- Use Hyperbrowser or Airtop for general cloud browser work at scale.
+- Use Steel for hosted Chromium sessions over Playwright CDP.
 - Use Orgo for full desktop/computer use.
 - Use Decodo/raw HTTP for API endpoints and cheap fetches.
 - Require approval for posting, commenting, messaging, submitting, uploading, payments, trading, banking, payouts, legal, government, health, insurance, identity, account changes, credentials, secrets, infrastructure, billing, workspace/channel/role/moderation changes, or destructive actions.

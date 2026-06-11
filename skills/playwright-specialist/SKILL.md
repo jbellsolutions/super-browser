@@ -1,6 +1,6 @@
 ---
 name: playwright-specialist
-description: Use local Playwright for deterministic browser automation. Use when a task is simple, testable, selector-driven, local, cheap, or needs fixture-based verification without advanced anti-bot or personal auth-session requirements.
+description: "Escalation rank 1 (default local browser): Use local Playwright for deterministic browser automation." Use when a task is simple, testable, selector-driven, local, cheap, or needs fixture-based verification without advanced anti-bot or personal auth-session requirements.
 ---
 
 # Playwright Specialist

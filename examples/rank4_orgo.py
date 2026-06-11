@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tier 5: Orgo Machines — Full desktop cloud VMs for AI agents.
+Escalation rank 4: Orgo Machines — full desktop cloud VMs for AI agents.
 
 When browser automation hits a wall, you need a real computer.
 Orgo provides sub-500ms boot cloud VMs with full Linux desktops.
@@ -17,7 +17,7 @@ Prerequisites:
     pip install orgo-sdk  # (hypothetical — check orgo.ai for actual package)
     export ORGO_API_KEY="org_..."
 
-Usage: python tier5_orgo.py
+Usage: python rank4_orgo.py
 """
 
 import os

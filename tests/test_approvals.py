@@ -138,7 +138,7 @@ class ApprovalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["SUPER_BROWSER_STATE_DIR"] = tmp
             run = create_run("Send a message in the browser")
-            complete_result = ExecutionResult(provider="rtrvr", status="complete", verification={"confidence": "high", "checks": ["approved execution"]})
+            complete_result = ExecutionResult(provider="browser-use", status="complete", verification={"confidence": "high", "checks": ["approved execution"]})
             with patch("super_browser.runtime.execute_plan", return_value=complete_result) as execute_mock:
                 approved = approve_run(run.run_id, approver="tester", reason="approved for test", execute=True)
             self.assertEqual(approved.status, "complete")
@@ -157,7 +157,7 @@ class ApprovalTests(unittest.TestCase):
             approved.approvals[-1]["decided_at"] = "2000-01-01T00:00:00+00:00"
             RunStore().save(approved)
 
-            complete_result = ExecutionResult(provider="rtrvr", status="complete", verification={"confidence": "low", "checks": ["should not execute"]})
+            complete_result = ExecutionResult(provider="browser-use", status="complete", verification={"confidence": "low", "checks": ["should not execute"]})
             with patch("super_browser.runtime.execute_plan", return_value=complete_result) as execute_mock:
                 resumed = resume_run(run.run_id)
 
@@ -501,7 +501,7 @@ class ApprovalTests(unittest.TestCase):
             self.assertTrue(run.plan["task"]["requires_auth"])
             self.assertTrue(run.plan["task"]["external_write"])
 
-            failed_result = ExecutionResult(provider="rtrvr", status="failed", error="simulated logged-in post failure")
+            failed_result = ExecutionResult(provider="browser-use", status="failed", error="simulated logged-in post failure")
             with patch("super_browser.runtime.execute_plan", return_value=failed_result):
                 attempted = approve_run(run.run_id, approver="tester", reason="approved initial logged-in post", execute=True)
             self.assertEqual(attempted.status, "failed")

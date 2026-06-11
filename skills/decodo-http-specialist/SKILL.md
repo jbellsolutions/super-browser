@@ -1,6 +1,6 @@
 ---
 name: decodo-http-specialist
-description: Use Decodo/raw HTTP for residential proxy fetches, API endpoints, JSON endpoints, cheap bulk data fetching, and requests/curl-style workflows. Use when browser rendering is unnecessary.
+description: "Separate lane (raw HTTP only, not browser): Use Decodo/raw HTTP for residential proxy fetches," API endpoints, JSON endpoints, cheap bulk data fetching, and requests/curl-style workflows. Use when browser rendering is unnecessary.
 ---
 
 # Decodo HTTP Specialist

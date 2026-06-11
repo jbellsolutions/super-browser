@@ -1,5 +1,38 @@
 # Super Browser Routing Playbook
 
+## Capability-first routing
+
+Routing starts with one question: **what does the task need?** Capabilities decide which providers *can* do the job; the escalation rank only orders equally capable providers from cheapest/most deterministic to most expensive.
+
+| What do you need? | Capability | Providers that have it |
+| --- | --- | --- |
+| Deterministic local browser, fixtures, `file://` | local runtime | `playwright` only |
+| Anti-bot hardened browsing | `supports_anti_bot` | `browser-use`, `hyperbrowser`, `steel`, `orgo` |
+| CAPTCHA solving | `supports_captcha` | `browser-use`, `hyperbrowser`, `steel` |
+| Authenticated sessions / logins | `supports_auth` | `browser-use`, `airtop`, `hyperbrowser`, `steel`, `orgo` |
+| Persistent named profiles (reusable logged-in state) | `supports_profiles` | `browser-use`, `airtop`, `hyperbrowser`, `steel` |
+| Upstream/residential proxy injection | `supports_proxy_injection` | `playwright`, `hyperbrowser`, `steel` |
+| Fleet / many parallel sessions | `supports_fleet` | `hyperbrowser`, `steel` |
+| Full desktop / OS apps / terminal | `supports_desktop` | `orgo` only |
+| Long-running / recurring jobs | `supports_long_running` | `browser-use`, `airtop`, `hyperbrowser`, `steel`, `orgo` |
+| Raw HTTP / JSON API fetch (no rendering) | `supports_raw_http` | `decodo-http` only — separate lane, never in browser fallbacks |
+
+Hard filters run first: raw HTTP goals with a concrete `http://`/`https://` endpoint go to the `decodo-http` lane, `file://` targets go to Playwright only, desktop terms route to Orgo, and providers missing a required capability are scored out.
+
+## Escalation rank (the cost tie-breaker)
+
+When several providers satisfy the capabilities, `rank_providers()` breaks the tie with an **escalation rank** — a cost/determinism preference, not the routing model:
+
+| Rank | Providers | Why this order |
+| --- | --- | --- |
+| 1 | `playwright`, `browser-use` | Free local / default cloud browser |
+| 2 | `hyperbrowser`, `airtop` | Cloud scale |
+| 3 | `steel` | Hosted Chromium sessions |
+| 4 | `orgo` | Full desktop VMs — most expensive, most capable |
+| — | `decodo-http` | Separate raw-HTTP lane, never ranked against browsers |
+
+Fallbacks walk **down** the ladder (1 → 2 → 3 → 4) among capable providers. `rank_providers()` applies rank bonuses, prefers Playwright at rank 1 only when the task is not anti-bot and not auth-required, and excludes Decodo from browser candidate sets unless the task is raw HTTP.
+
 ## Default Flow
 
 1. Orchestrator receives the user request.
@@ -130,11 +163,11 @@ Verifier run ids, report ownership, and artifact paths are also part of executio
 
 Raw HTTP redirects are part of provider execution policy. A redirect into `loopback`, `private_network`, `link_local`, or `local_file` is blocked unless the run was originally planned for that same target scope. Treat a `raw_http_redirect_target_scope` event as a safety stop, not as an ordinary network failure.
 
-Playwright-backed browser requests are also part of provider execution policy. Local Playwright, Browserbase/Stagehand CDP, and Steel CDP install a request guard before navigation; if a browser redirect or subresource request targets `loopback`, `private_network`, `link_local`, or `local_file` from a different planned scope, execution returns `blocked` with `browser_request_target_scope` metadata instead of page artifacts. If browser close/disconnect fails after a successful capture, keep the captured artifacts and treat `browser_close_failed` as a warning, not as proof the automation failed.
+Playwright-backed browser requests are also part of provider execution policy. Local Playwright and Steel CDP install a request guard before navigation; if a browser redirect or subresource request targets `loopback`, `private_network`, `link_local`, or `local_file` from a different planned scope, execution returns `blocked` with `browser_request_target_scope` metadata instead of page artifacts. If browser close/disconnect fails after a successful capture, keep the captured artifacts and treat `browser_close_failed` as a warning, not as proof the automation failed.
 
-Raw HTTP, URL-capable remote/desktop providers, and Playwright-backed browser guards resolve `public_web` hostnames before continuing. If DNS resolution returns a loopback, private-network, or link-local address, or local DNS resolution fails and the target cannot be verified, the run is blocked with target-scope evidence. Treat this as DNS-rebinding and split-horizon protection and replan for the real target scope instead of retrying. For remote/desktop providers, `provider_url_resolved_target_scope` means the target URL was blocked before it was sent to Browser Use, Rtrvr, Browserbase, Orgo, Airtop, Hyperbrowser, Steel, or Browserless. Target-scope and DNS safety stops are non-resumable; handoff returns `resume.safe_to_resume=false`, and direct resume records `resume_blocked` until a fresh run or replan exists.
+Raw HTTP, URL-capable remote/desktop providers, and Playwright-backed browser guards resolve `public_web` hostnames before continuing. If DNS resolution returns a loopback, private-network, or link-local address, or local DNS resolution fails and the target cannot be verified, the run is blocked with target-scope evidence. Treat this as DNS-rebinding and split-horizon protection and replan for the real target scope instead of retrying. For remote/desktop providers, `provider_url_resolved_target_scope` means the target URL was blocked before it was sent to Browser Use, Orgo, Airtop, Hyperbrowser, or Steel. Target-scope and DNS safety stops are non-resumable; handoff returns `resume.safe_to_resume=false`, and direct resume records `resume_blocked` until a fresh run or replan exists.
 
-Provider transport override env vars are preflighted separately from target URLs. `RTRVR_API_BASE`, `ORGO_API_BASE`, `AIRTOP_API_BASE`, `HYPERBROWSER_API_BASE`, `BROWSERLESS_BASE_URL`, and `STEEL_CDP_URL` may use loopback HTTP/WS for self-hosted local providers, but private-network/link-local provider endpoints or insecure remote HTTP/WS require explicit override env vars before credentials are sent.
+Provider transport override env vars are preflighted separately from target URLs. `ORGO_API_BASE`, `AIRTOP_API_BASE`, `HYPERBROWSER_API_BASE`, and `STEEL_CDP_URL` may use loopback HTTP/WS for self-hosted local providers, but private-network/link-local provider endpoints or insecure remote HTTP/WS require explicit override env vars before credentials are sent.
 
 Approval-gated plans must use the durable run lifecycle. The low-level `execute_plan()` adapter API re-checks task policy, blocks approval-required plans by default, and requires structured `approval_context` from runtime code after approval has been recorded. A bare approval boolean must not be treated as sufficient proof.
 
@@ -218,15 +251,15 @@ Use council mode when any of these are true:
 
 ### Simple extraction
 
-Route: Playwright -> Browserbase/Stagehand -> Browser Use.
+Route: Playwright -> Hyperbrowser -> Browser Use.
 
 ### Authenticated browsing
 
-Route: Rtrvr if local Chrome profile exists -> Browserbase Contexts -> Browser Use profiles.
+Route: Browser Use profiles -> Airtop sessions -> Steel sessions.
 
 ### Anti-bot workflow
 
-Route: Browser Use -> Browserbase/Stagehand -> Hyperbrowser/Steel evaluation -> Orgo only if desktop fallback is justified.
+Route: Browser Use -> Hyperbrowser -> Steel -> Orgo only if desktop fallback is justified.
 
 ### Raw data/API endpoint
 

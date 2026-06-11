@@ -1,6 +1,6 @@
 ---
 name: airtop-specialist
-description: Use Airtop for cloud browser sessions, page-query extraction, no-code or webhook-driven browser agents, scheduled GTM workflows, and business-user-maintained automations. Use when Airtop's agent/session model is a better operational fit than a local browser runtime.
+description: "Escalation rank 2 (cloud scale): Use Airtop for cloud browser sessions," page-query extraction, no-code or webhook-driven browser agents, scheduled GTM workflows, and business-user-maintained automations. Use when Airtop's agent/session model is a better operational fit than a local browser runtime.
 ---
 
 # Airtop Specialist

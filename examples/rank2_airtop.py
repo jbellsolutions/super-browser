@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tier 3: Airtop — No-code browser automation backup.
+Escalation rank 2: Airtop — cloud scale page-query and GTM automations.
 
 Cloud SaaS for GTM and scheduled workflows. Conversational agent builder,
 built-in scheduling, pre-built templates. REST API + webhooks.
@@ -15,7 +15,7 @@ Prerequisites:
     API key from https://portal.airtop.ai/api-keys
     Build an agent in the conversational UI first
 
-Usage: python tier3_airtop.py
+Usage: python rank2_airtop.py
 """
 
 import os

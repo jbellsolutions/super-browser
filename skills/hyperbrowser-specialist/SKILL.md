@@ -1,6 +1,6 @@
 ---
 name: hyperbrowser-specialist
-description: Evaluate and use Hyperbrowser for cloud browser automation when its API and pricing fit the workflow. Use as an evaluating provider until live Super Browser tests prove reliability for a task class.
+description: "Escalation rank 2 (cloud scale): Evaluate and use Hyperbrowser for cloud browser automation" when its API and pricing fit the workflow. Use as an evaluating provider until live Super Browser tests prove reliability for a task class.
 ---
 
 # Hyperbrowser Specialist
@@ -10,7 +10,7 @@ description: Evaluate and use Hyperbrowser for cloud browser automation when its
 - Cloud browser automation experiments.
 - REST scrape jobs where markdown, HTML, or link output is enough.
 - Scale-oriented browser workflows after live tests.
-- Fallback evaluation when Browserbase or Browser Use are not ideal.
+- Fallback evaluation when Browser Use is not ideal.
 
 ## Do Not Use For
 

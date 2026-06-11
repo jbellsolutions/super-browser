@@ -4,6 +4,8 @@
 > **Tier in Stack:** Tier 1 — Primary Anti-Detection Workhorse  
 > **Last Updated:** June 5, 2026
 
+> **Lineup note (June 2026):** Browserbase, Browserless, and Rtrvr have since been removed from the Super Browser provider lineup. Mentions below are kept as historical research context. Current ladder: Playwright + Browser Use (T1) → Hyperbrowser + Airtop (T2) → Steel (T3) → Orgo (T4), with Decodo as a separate raw-HTTP lane.
+
 ---
 
 ## Table of Contents
@@ -312,8 +314,8 @@ Browser Use is purely browser-based. For desktop applications, multi-window work
 
 ### When to Use Something Else
 
-- **Quick single-page extraction** (non-anti-bot) → Tier 2 (Browserbase)
-- **Authenticated sessions with existing login** → Tier 4 (Rtrvr)
+- **Quick single-page extraction** (non-anti-bot) → Playwright (T1) or Hyperbrowser (T2)
+- **Hosted CDP browser infrastructure** → Steel (T3)
 - **Cost-sensitive HTTP scraping** → Decodo proxies ($2/GB)
-- **Full desktop automation** → Tier 5 (Orgo Machines)
+- **Full desktop automation** → Orgo Machines (T4)
 - **Maximum control + custom proxies** → Playwright + Decodo on Orgo VMs

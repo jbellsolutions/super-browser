@@ -4,10 +4,10 @@ Live tests are gated by env vars. If a key is missing, the test should skip and 
 
 | Scenario | Local fixture | Live provider tests | Required proof |
 | --- | --- | --- | --- |
-| Basic extraction | Playwright fixture page | Browserbase, Browser Use, Hyperbrowser, Steel, Browserless | Structured JSON matches schema |
-| Login/session | Local fake login | Rtrvr, Browserbase Contexts, Browser Use profiles | Session persists across run |
-| Infinite scroll | Fixture list page | Browserbase, Browser Use | Expected item count |
-| Form fill no submit | Fixture form | Playwright, Browserbase, Browser Use | Draft exists, not submitted |
+| Basic extraction | Playwright fixture page | Browser Use, Hyperbrowser, Steel | Structured JSON matches schema |
+| Login/session | Local fake login | Browser Use profiles, Airtop sessions | Session persists across run |
+| Infinite scroll | Fixture list page | Browser Use, Hyperbrowser | Expected item count |
+| Form fill no submit | Fixture form | Playwright, Browser Use | Draft exists, not submitted |
 | External write gate | Fixture submit page | All write-capable routes | Run stops awaiting approval |
 | Raw HTTP | Local JSON endpoint | Decodo direct raw HTTP, plus proxy metadata when `DECODO_PROXY` exists | Status, body, direct/proxy metadata |
 | Full desktop | None by default | Orgo | Computer-use response, screenshot, cleanup |
@@ -39,12 +39,11 @@ Run all configured provider proofs:
 
 ```bash
 super-browser live-test --provider all
-super-browser live-test --provider rtrvr --workflow-class authenticated_read
 super-browser live-test --provider decodo-http --workflow-class raw_http_direct
 super-browser live-test --provider browser-use --workflow-class external_write_gate
 ```
 
-Providers with missing keys return `skipped`. A skipped result is an observation that no live provider execution happened; it does not erase a previous fresh pass for the same workflow class. A real `failed` result does replace the per-class record and removes certification for that class. Providers with configured keys run through the durable saved-run lifecycle with a strict single-provider allowlist, then execute through `resume` or the standard approval flow when the fixture is policy-gated. This keeps live evidence tied to the same runtime path agents use. Provider fixtures run a read-only `https://example.com` task, except Orgo, which submits a harmless computer-use task and requests a screenshot against `ORGO_COMPUTER_ID`.
+Providers with missing keys return `skipped`. A skipped result is an observation that no live provider execution happened; it does not erase a previous fresh pass for the same workflow class. A real `failed` result does replace the per-class record and removes certification for that class. Providers with configured keys run through the durable saved-run lifecycle with a strict single-provider allowlist, then execute through `resume` or the standard approval flow when the fixture is policy-gated. This keeps live evidence tied to the same runtime path agents use. Provider fixtures run a read-only `https://example.com` task, except Orgo, which submits a harmless computer-use task and requests a screenshot against the resolved computer (pinned `ORGO_COMPUTER_ID`, or an auto-discovered/created computer in the `super-browser` workspace).
 
 Each provider evidence record includes a `workflow_class`. Current built-in classes are `raw_http_direct`, `local_browser_fixture`, `general_read`, `authenticated_read`, `desktop_read`, and `external_write_gate`. Doctor exposes `certified_workflow_classes` and `production_ready_scope`; agents must not treat a `general_read` pass as proof for social posting, anti-bot, authenticated, or desktop workflows. Evidence accumulates by workflow class per provider, so running a second class does not erase a still-fresh earlier class proof.
 
@@ -54,11 +53,10 @@ Supported built-in provider/class pairs:
 
 | Provider | Built-in workflow class |
 | --- | --- |
-| `decodo-http` | `raw_http_direct`, `external_write_gate` |
+| `decodo-http` | `raw_http_direct` |
 | `playwright` | `local_browser_fixture`, `external_write_gate` |
-| `rtrvr` | `authenticated_read`, `external_write_gate` |
 | `orgo` | `desktop_read`, `external_write_gate` |
-| `browserbase-stagehand`, `browser-use`, `airtop`, `hyperbrowser`, `steel`, `browserless` | `general_read`, `external_write_gate` |
+| `browser-use`, `airtop`, `hyperbrowser`, `steel` | `general_read`, `external_write_gate` |
 
 `external_write_gate` creates a provider-locked publish/comment-style run and passes only when the run stops in `awaiting_approval`, a pending approval exists, and no provider execution event starts. It can run without provider credentials because it must not call the provider.
 
@@ -97,28 +95,12 @@ export BROWSER_USE_API_KEY=...
 super-browser run --goal "Search a protected public site and return JSON" --url "https://example.com"
 ```
 
-Rtrvr:
-
-```bash
-export RTRVR_API_KEY=...
-super-browser run --goal "Use my logged-in session to extract dashboard alerts" --url "https://example.com"
-```
-
-The Rtrvr adapter prefers the CLI when installed and falls back to the HTTP `/agent` API.
-
-Browserbase:
-
-```bash
-export BROWSERBASE_API_KEY=...
-export BROWSERBASE_PROJECT_ID=...
-super-browser run --goal "Extract page title with Browserbase" --url "https://example.com"
-```
-
 Orgo:
 
 ```bash
 export ORGO_API_KEY=...
-export ORGO_COMPUTER_ID=...
+# Optional: pin a specific computer; otherwise one is discovered or created automatically.
+# export ORGO_COMPUTER_ID=...
 super-browser run --goal "Use a desktop computer to inspect files"
 ```
 
@@ -151,15 +133,6 @@ super-browser run --goal "Capture page text and screenshot with Steel" --url "ht
 ```
 
 The Steel adapter connects over Playwright CDP and captures the same artifact types as local Playwright.
-
-Browserless:
-
-```bash
-export BROWSERLESS_TOKEN=...
-super-browser run --goal "Scrape body text with Browserless" --url "https://example.com"
-```
-
-The Browserless adapter calls REST `/scrape?token=...`. Set `BROWSERLESS_BASE_URL` to use another Browserless region or deployment.
 
 ## Confidence Levels
 

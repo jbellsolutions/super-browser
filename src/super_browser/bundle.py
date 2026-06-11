@@ -54,9 +54,14 @@ MCP_TOOL_NAMES = [
     "production_readiness",
     "bundle_manifest",
     "env_checklist",
+    "setup_walkthrough",
     "run_browser_live_tests",
     "install_super_browser_skill",
     "init_super_browser_mcp",
+    "list_browser_profiles",
+    "get_browser_profile",
+    "create_browser_profile",
+    "delete_browser_profile",
 ]
 
 RESOURCE_URIS = [
@@ -67,6 +72,8 @@ RESOURCE_URIS = [
     "super-browser://references/cost-model",
     "super-browser://references/security-and-approval-policy",
     "super-browser://references/live-test-matrix",
+    "super-browser://docs/setup-walkthrough",
+    "super-browser://docs/agent-quickstart",
 ]
 
 

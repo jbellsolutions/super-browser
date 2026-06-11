@@ -266,12 +266,14 @@ Orgo was added as **Tier 5** in response to a second request from Justin. The ra
 
 ### Decision: Tier Placement
 
+> **Superseded (June 2026):** the ladder below was the original research ranking. Browserbase and Rtrvr were later cut for simplicity. Current ladder: Playwright + Browser Use (T1) → Hyperbrowser + Airtop (T2) → Steel (T3) → Orgo (T4), Decodo as a separate raw-HTTP lane.
+
 | Tool | Tier | Reason |
 |------|:----:|--------|
 | **Browser Use Cloud** | 1 | Best anti-detection, MCP-native, AI-native |
-| **Browserbase** | 2 | Already in Hermes, free, quick single-page |
+| **Browserbase** | 2 (removed) | Originally: already in Hermes, free, quick single-page |
 | **Airtop** | 3 | No-code, scheduled, SOC2, backup |
-| **Rtrvr** | 4 | MCP-native, auth sessions, BYOK |
+| **Rtrvr** | 4 (removed) | Originally: MCP-native, auth sessions, BYOK |
 | **Orgo Machines** | 5 | Full desktop VMs, extends beyond browsers |
 | **Anchor** | Skipped | Pricing opacity, overlap with Tier 1, no self-serve |
-| **Decodo** | Proxy layer | $2/GB residential IPs for Tier 2 fallback |
+| **Decodo** | Proxy layer | $2/GB residential IPs for raw HTTP scraping |

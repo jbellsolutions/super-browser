@@ -1,8 +1,10 @@
 # Deep-Dive: Airtop — Cloud Browser SaaS Platform
 
 > **Provider:** Airtop (`airtop.ai`)  
-> **Tier in Stack:** Tier 3 — No-Code SaaS Backup  
+> **Tier in Stack:** Tier 2 — No-Code SaaS Backup
 > **Last Updated:** June 5, 2026
+
+> **Lineup note (June 2026):** Browserbase and Rtrvr were removed from the Super Browser lineup after this research was written; comparisons below are historical context. Airtop now sits in Tier 2 alongside Hyperbrowser.
 
 ---
 
@@ -283,8 +285,8 @@ As of June 2026, Airtop's API uses `/v1/` but versioning practices are unclear. 
 ### When to Use Something Else
 
 - **Meta/Facebook/Cloudflare scraping** → Browser Use Cloud (proven anti-detection)
-- **AI agent integration with MCP** → Browser Use Cloud or Rtrvr
+- **AI agent integration with MCP** → Browser Use Cloud
 - **Programmatic control with SDK** → Browser Use Cloud (Python SDK v3)
 - **Structured typed output** → Browser Use Cloud (Pydantic/Zod)
 - **Maximum flexibility/custom proxies** → Playwright + Decodo on raw infra
-- **Authenticated sessions** → Rtrvr (preserves Chrome login state)
+- **Authenticated sessions** → Browser Use Cloud (persistent profiles)

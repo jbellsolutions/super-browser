@@ -9,7 +9,7 @@ Decodo residential proxies ($2/GB, sticky 10-min sessions) for:
 4. Geo-targeting with specific country exit nodes
 
 ⚠️ DOES NOT WORK against Facebook headless detection.
-For Meta/LinkedIn/Cloudflare-protected sites, use Tier 1 (Browser Use Cloud).
+For Meta/LinkedIn/Cloudflare-protected sites, use rank 1 (Browser Use Cloud).
 
 Proxy details:
     Host: us.decodo.com
@@ -198,7 +198,7 @@ BROWSER_USE_DECODO_PATTERN = """
 # ⚠️ Browser Use open-source has NO built-in stealth and NO direct proxy support.
 # Proxy support is only available through Browser Use Cloud (use_cloud=True).
 # For local + Decodo, use Playwright directly (Pattern 3).
-# For anti-detection, use Browser Use Cloud with built-in proxies (Tier 1).
+# For anti-detection, use Browser Use Cloud with built-in proxies (rank 1).
 
 from browser_use.agent.service import Agent
 from browser_use import Browser
@@ -301,6 +301,6 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 60)
     print("⚠️  Reminder: Decodo does NOT bypass Facebook headless detection.")
-    print("   For Meta/LinkedIn/Cloudflare: use Browser Use Cloud (Tier 1).")
+    print("   For Meta/LinkedIn/Cloudflare: use Browser Use Cloud (rank 1).")
     print("   Decodo is for raw HTTP, Playwright fallback, and cost optimization.")
     print("=" * 60)

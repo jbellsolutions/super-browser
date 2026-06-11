@@ -1,6 +1,6 @@
 ---
 name: steel-specialist
-description: Evaluate and use Steel for cloud browser sessions and agent browser infrastructure. Use as an evaluating provider until live Super Browser tests prove task-specific reliability.
+description: "Escalation rank 3 (hosted Chromium): Evaluate and use Steel for cloud browser sessions" and agent browser infrastructure. Use as an evaluating provider until live Super Browser tests prove task-specific reliability.
 ---
 
 # Steel Specialist
@@ -10,7 +10,7 @@ description: Evaluate and use Steel for cloud browser sessions and agent browser
 - Cloud browser sessions to evaluate.
 - Agent-focused browser infrastructure.
 - Playwright CDP control against Steel-hosted browser sessions.
-- Fallbacks where Browserbase, Browser Use, or Playwright are not a fit.
+- Fallbacks where Browser Use or Playwright are not a fit.
 
 ## Do Not Use For
 

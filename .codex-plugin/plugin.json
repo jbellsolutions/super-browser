@@ -1,6 +1,6 @@
 {
   "name": "super-browser",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Universal browser and computer automation plugin for agents. Includes specialist skills, a routing CLI, and an MCP server for choosing the right browser, proxy, authenticated session, or desktop backend.",
   "author": {
     "name": "AI Integraterz",
@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "Super Browser",
     "shortDescription": "Route agent browser and computer automation to the right tool.",
-    "longDescription": "Super Browser gives agents a documented plugin, CLI, and MCP interface for browser automation. It routes simple tasks to local Playwright, cloud browser work to Browserbase or Browser Use, logged-in sessions to Rtrvr, raw HTTP to Decodo, and full desktop work to Orgo, with specialist skills and approval policy for external writes.",
+    "longDescription": "Super Browser gives agents a documented plugin, CLI, and MCP interface for browser automation. Routing is capability-first (auth, anti-bot, CAPTCHA, profiles, proxy injection, fleet, desktop, raw HTTP) with an escalation rank as the cost tie-breaker: local Playwright and Browser Use (rank 1), Hyperbrowser/Airtop cloud scale (rank 2), Steel hosted Chromium (rank 3), Orgo desktop (rank 4), and raw HTTP to Decodo on a separate lane, with specialist skills and approval policy for external writes.",
     "developerName": "AI Integraterz",
     "category": "Engineering",
     "capabilities": ["Read", "Write", "Interactive"],

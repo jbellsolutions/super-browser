@@ -11,8 +11,25 @@ from urllib.parse import urlparse
 from .costs import estimate_provider_cost, estimate_sequence_cost
 from .models import Plan, PlanStep, TargetScope, TaskSpec
 from .policy import approval_required, enrich_policy_flags, infer_risk, long_running_for_goal, requires_auth_for_goal
+from .profiles import ProfileStore
 from .providers import PROVIDERS
 
+# Escalation ladder: a cost/escalation tie-breaker, not the routing model.
+# Capabilities (auth, anti-bot, captcha, profiles, proxy, fleet, desktop, raw HTTP)
+# decide which providers CAN do the job; the rank only orders equally capable
+# providers from cheapest/most deterministic to most expensive.
+# Rank -1 = raw HTTP lane only (decodo), never used for browser work.
+PROVIDER_ESCALATION_RANK: dict[str, int] = {
+    "playwright": 1,
+    "browser-use": 1,
+    "hyperbrowser": 2,
+    "airtop": 2,
+    "steel": 3,
+    "orgo": 4,
+    "decodo-http": -1,
+}
+
+ESCALATION_PRIORITY_BONUS: dict[int, int] = {1: 40, 2: 30, 3: 20, 4: 10, -1: 0}
 
 OPTIMIZE_VALUES = ("balanced", "cost", "reliability")
 ANTI_BOT_TERMS = ("cloudflare", "perimeterx", "datadome", "facebook", "instagram", "linkedin", "meta", "captcha")
@@ -59,11 +76,9 @@ TRAILING_EXTRACTED_URL_CHARS = ".,;:!?)]}>\"'"
 URL_REQUIRED_PROVIDERS = {
     "playwright",
     "decodo-http",
-    "browserbase-stagehand",
     "airtop",
     "hyperbrowser",
     "steel",
-    "browserless",
 }
 
 
@@ -74,6 +89,9 @@ def infer_task(
     providers_allowed: list[str] | None = None,
     max_cost_usd: float | None = None,
     timeout_seconds: int | None = None,
+    profile: str | None = None,
+    proxy: str | None = None,
+    fleet_index: int | None = None,
 ) -> TaskSpec:
     goal = _validate_goal(goal)
     text = goal.lower()
@@ -82,11 +100,15 @@ def infer_task(
     optimize_value = _validate_optimize(optimize)
     max_cost = _validate_max_cost_usd(max_cost_usd)
     timeout = _validate_timeout_seconds(timeout_seconds)
+    profile_name = _validate_profile_name(profile)
+    proxy_value = _validate_proxy_hint(proxy)
+    if profile_name:
+        _ensure_profile_exists(profile_name)
     task = TaskSpec(
         goal=goal,
         url=task_url,
         anti_bot_risk=_contains_any(text, ANTI_BOT_TERMS),
-        requires_auth=requires_auth_for_goal(goal),
+        requires_auth=requires_auth_for_goal(goal) or bool(profile_name),
         needs_desktop=_contains_any(text, DESKTOP_TERMS),
         raw_http=_contains_any(text, RAW_HTTP_TERMS),
         long_running=long_running_for_goal(goal),
@@ -95,12 +117,17 @@ def infer_task(
         max_cost_usd=max_cost,
         timeout_seconds=timeout,
         providers_allowed=allowed_providers,
+        profile=profile_name,
+        proxy=proxy_value,
+        fleet_index=fleet_index,
     )
     return enrich_policy_flags(task)
 
 
 def build_plan(task: TaskSpec) -> Plan:
     _validate_task_constraints(task)
+    if task.profile:
+        _ensure_profile_exists(task.profile)
     _validate_planning_requirements(task)
     ranked = rank_providers(task)
     if not ranked:
@@ -164,7 +191,10 @@ def rank_providers(task: TaskSpec) -> list[str]:
     for name in candidates:
         provider = PROVIDERS[name]
         score = 0
-        if name == "playwright":
+        rank = PROVIDER_ESCALATION_RANK.get(name, 99)
+        if rank >= 1:
+            score += ESCALATION_PRIORITY_BONUS.get(rank, 0)
+        if name == "playwright" and not task.anti_bot_risk and not task.requires_auth:
             score += 50
         if task.optimize == "cost":
             score += {"free": 25, "low": 18, "medium": 8, "variable": 5, "high": 0}[provider.cost_band]
@@ -178,32 +208,45 @@ def rank_providers(task: TaskSpec) -> list[str]:
             score += 75 if provider.supports_anti_bot else -10
         if task.requires_auth:
             score += 45 if provider.supports_auth else -15
-            if name == "rtrvr":
-                score += 20
-            elif name == "browserbase-stagehand":
-                score += 12
-            elif name == "browser-use":
+            if name == "browser-use":
                 score += 10
         if task.long_running:
             score += 20 if provider.supports_long_running else -8
-        if task.external_write and name in ("rtrvr", "browser-use", "browserbase-stagehand", "orgo"):
+        if task.external_write and name in ("browser-use", "orgo"):
             score += 8
         if task.external_write and not task.url and name in URL_REQUIRED_PROVIDERS:
             score -= 70
+        if task.profile:
+            score += 60 if provider.supports_profiles else -40
+            if task.profile and name == "browser-use":
+                score += 8
+        if task.proxy and provider.supports_proxy_injection:
+            score += 25
         if provider.stability == "evaluating":
             score -= 12
         scores[name] = score
-    return sorted(scores, key=lambda item: scores[item], reverse=True)
+    return sorted(
+        scores,
+        key=lambda item: (-scores[item], PROVIDER_ESCALATION_RANK.get(item, 99)),
+    )
 
 
 def _candidate_providers(task: TaskSpec) -> list[str]:
     candidates = [name for name in PROVIDERS if not task.providers_allowed or name in task.providers_allowed]
+    if task.raw_http:
+        candidates = [name for name in candidates if name == "decodo-http"]
+    else:
+        candidates = [name for name in candidates if name != "decodo-http"]
     if not task.url:
         candidates = [name for name in candidates if name not in URL_REQUIRED_PROVIDERS]
     if _is_file_url(task.url):
         candidates = [name for name in candidates if name == "playwright"]
     if task.max_cost_usd is not None:
         candidates = [name for name in candidates if estimate_provider_cost(name, task)["estimated_floor_usd"] <= task.max_cost_usd]
+    if task.profile:
+        candidates = [name for name in candidates if PROVIDERS[name].supports_profiles]
+    if task.proxy:
+        candidates = [name for name in candidates if PROVIDERS[name].supports_proxy_injection or name == "decodo-http"]
     return candidates
 
 
@@ -299,6 +342,38 @@ def provider_sequence_constraint_failures(plan: Plan | dict[str, Any]) -> list[d
                     "message": "Plan provider sequence violates task max_cost_usd",
                     "providers": over_budget,
                     "max_cost_usd": task.max_cost_usd,
+                }
+            )
+    if task.profile:
+        if not ProfileStore(create=False).get(task.profile):
+            failures.append(
+                {
+                    "type": "provider_profile_missing",
+                    "message": f"Named profile {task.profile!r} was not found in ProfileStore",
+                    "profile": task.profile,
+                }
+            )
+        unsupported = [name for name in known_sequence if not PROVIDERS[name].supports_profiles]
+        if unsupported:
+            failures.append(
+                {
+                    "type": "provider_profile_constraint_violation",
+                    "message": "Plan provider sequence includes providers that do not support named profiles",
+                    "providers": unsupported,
+                    "profile": task.profile,
+                }
+            )
+    if task.proxy:
+        unsupported_proxy = [
+            name for name in known_sequence if name not in {"decodo-http"} and not PROVIDERS[name].supports_proxy_injection
+        ]
+        if unsupported_proxy:
+            failures.append(
+                {
+                    "type": "provider_proxy_constraint_violation",
+                    "message": "Plan provider sequence includes providers that do not support proxy injection",
+                    "providers": unsupported_proxy,
+                    "proxy": task.proxy,
                 }
             )
     return failures
@@ -437,6 +512,32 @@ def _validate_timeout_seconds(timeout_seconds: int | None) -> int | None:
     return int(timeout_seconds)
 
 
+def _validate_profile_name(profile: str | None) -> str | None:
+    if profile is None:
+        return None
+    if not isinstance(profile, str) or not profile.strip():
+        raise ValueError("profile must be a non-empty string when provided")
+    normalized = profile.strip()
+    if any(char.isspace() for char in normalized):
+        raise ValueError("profile must not contain whitespace")
+    if len(normalized) > 64:
+        raise ValueError("profile must be 64 characters or fewer")
+    return normalized
+
+
+def _validate_proxy_hint(proxy: str | None) -> str | None:
+    if proxy is None:
+        return None
+    if not isinstance(proxy, str) or not proxy.strip():
+        raise ValueError("proxy must be a non-empty string when provided")
+    return proxy.strip()
+
+
+def _ensure_profile_exists(name: str) -> None:
+    if not ProfileStore(create=False).get(name):
+        raise ValueError(f"Profile not found: {name}. Create it with `super-browser profiles create --name {name}`.")
+
+
 def _validate_task_constraints(task: TaskSpec) -> None:
     task.goal = _validate_goal(task.goal)
     task.url = _validate_url(task.url)
@@ -445,6 +546,8 @@ def _validate_task_constraints(task: TaskSpec) -> None:
     task.optimize = _validate_optimize(task.optimize)
     task.max_cost_usd = _validate_max_cost_usd(task.max_cost_usd)
     task.timeout_seconds = _validate_timeout_seconds(task.timeout_seconds)
+    task.profile = _validate_profile_name(task.profile)
+    task.proxy = _validate_proxy_hint(task.proxy)
 
 
 def _validate_planning_requirements(task: TaskSpec) -> None:
@@ -558,18 +661,12 @@ def _purpose_for(provider_name: str, task: TaskSpec) -> str:
         return "Use raw HTTP and residential proxy routing because rendering is not required."
     if provider_name == "browser-use":
         return "Use hardened cloud browser automation for anti-bot or complex browser work."
-    if provider_name == "rtrvr":
-        return "Use an authenticated local Chrome/extension session."
-    if provider_name == "browserbase-stagehand":
-        return "Use cloud browser sessions and Stagehand-style natural-language actions."
     if provider_name == "airtop":
         return "Use Airtop cloud sessions and page-query extraction."
     if provider_name == "hyperbrowser":
         return "Use Hyperbrowser cloud scraping for live-gated scale workflows."
     if provider_name == "steel":
         return "Use Steel cloud browser sessions through Playwright CDP."
-    if provider_name == "browserless":
-        return "Use Browserless hosted Chromium REST APIs."
     return "Use local deterministic browser automation."
 
 
@@ -735,6 +832,10 @@ def _rationale(task: TaskSpec, primary: str, mode: str) -> list[str]:
         lines.append("Anti-bot risk detected; hardened/cloud providers are prioritized.")
     if task.requires_auth:
         lines.append("Authenticated session need detected; profile/session-capable providers are prioritized.")
+    if task.profile:
+        lines.append(f"Named profile {task.profile!r} is bound; only profile-capable providers are eligible.")
+    if task.proxy:
+        lines.append("Proxy injection requested; providers with upstream proxy support are prioritized.")
     if task.needs_desktop:
         lines.append("Desktop need detected; computer-use backends are prioritized.")
     if task.raw_http:

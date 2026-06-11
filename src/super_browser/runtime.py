@@ -49,6 +49,9 @@ UNTRUSTED_PROVIDER_CONSTRAINT_FAILURE_TYPES = {
     "provider_target_scope_mismatch",
     "provider_missing_url_constraint_violation",
     "provider_raw_http_url_constraint_violation",
+    "provider_profile_missing",
+    "provider_profile_constraint_violation",
+    "provider_proxy_constraint_violation",
 }
 DURABLE_ARTIFACT_TYPES = {"plan"}
 
@@ -61,6 +64,9 @@ def create_run(
     providers_allowed: list[str] | None = None,
     max_cost_usd: float | None = None,
     timeout_seconds: int | None = None,
+    profile: str | None = None,
+    proxy: str | None = None,
+    fleet_index: int | None = None,
 ) -> RunState:
     task = infer_task(
         goal,
@@ -69,6 +75,9 @@ def create_run(
         providers_allowed=providers_allowed,
         max_cost_usd=max_cost_usd,
         timeout_seconds=timeout_seconds,
+        profile=profile,
+        proxy=proxy,
+        fleet_index=fleet_index,
     )
     plan = build_plan(task)
     status = "awaiting_approval" if plan.approval_required else "planned"

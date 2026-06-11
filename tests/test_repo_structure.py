@@ -18,15 +18,12 @@ class RepoStructureTests(unittest.TestCase):
             "super-browser-planner",
             "super-browser-verifier",
             "browser-use-specialist",
-            "browserbase-stagehand-specialist",
             "playwright-specialist",
-            "rtrvr-specialist",
             "orgo-specialist",
             "airtop-specialist",
             "decodo-http-specialist",
             "hyperbrowser-specialist",
             "steel-specialist",
-            "browserless-specialist",
             "publishing-safety-specialist",
         ]
         for name in required:

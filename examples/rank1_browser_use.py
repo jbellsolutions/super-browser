@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Tier 1: Browser Use Cloud — Primary anti-detection browser automation.
+Escalation rank 1: Browser Use Cloud — anti-bot browser automation (paired with Playwright for local work).
 
-This is the workhorse. Hardened Chromium fork that passes CreepJS and BrowserLeaks.
+Hardened Chromium fork that passes CreepJS and BrowserLeaks.
 Cloudflare bypass, PerimeterX bypass, Meta Ad Library — this handles what nothing else can.
 
 Prerequisites:
@@ -10,7 +10,7 @@ Prerequisites:
     export BROWSER_USE_API_KEY="bu_live_..."
 
 Usage:
-    python tier1_browser_use.py
+    python rank1_browser_use.py
 """
 
 import os

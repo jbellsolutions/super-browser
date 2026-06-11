@@ -157,42 +157,48 @@ class RedactionTests(unittest.TestCase):
             server.server_close()
 
     def test_redacts_provider_output_without_breaking_session_ids(self):
-        old_key = os.environ.get("RTRVR_API_KEY")
-        os.environ["RTRVR_API_KEY"] = "needle-rtrvr-env"
+        old_key = os.environ.get("HYPERBROWSER_API_KEY")
+        old_poll = os.environ.get("HYPERBROWSER_POLL_SECONDS")
+        os.environ["HYPERBROWSER_API_KEY"] = "needle-hyperbrowser-env"
+        os.environ["HYPERBROWSER_POLL_SECONDS"] = "0"
 
         class FakeResponse:
             def read(self):
                 return (
-                    b'{"access_token": "needle-provider-token", '
+                    b'{"jobId": "job_123", "status": "completed", '
+                    b'"access_token": "needle-provider-token", '
                     b'"url": "https://trace.example/watch?token=needle-trace-token", '
                     b'"session_id": "session_123"}'
                 )
 
         try:
-            with patch("super_browser.adapters.shutil.which", return_value=None):
-                with patch("super_browser.adapters.urlopen", return_value=FakeResponse()):
-                    plan = build_plan(infer_task("Use my logged in Chrome session to read private dashboard notifications"))
-                    with tempfile.TemporaryDirectory() as tmp:
-                        result = execute_plan(plan, "run_rtrvr_redaction", state_dir=Path(tmp), use_fallbacks=False, approval_context=_approval_context_for(plan))
-                        payload = result.to_dict()
-                        output_path = Path(payload["artifacts"][0]["path"])
-                        output = json.loads(output_path.read_text(encoding="utf-8"))
+            with patch("super_browser.adapters.urlopen", return_value=FakeResponse()):
+                plan = build_plan(infer_task("Read https://example.com and report the page title", url="https://example.com", providers_allowed=["hyperbrowser"]))
+                with tempfile.TemporaryDirectory() as tmp:
+                    result = execute_plan(plan, "run_hyperbrowser_redaction", state_dir=Path(tmp), use_fallbacks=False, approval_context=_approval_context_for(plan))
+                    payload = result.to_dict()
+                    output_path = Path(payload["artifacts"][0]["path"])
+                    output = json.loads(output_path.read_text(encoding="utf-8"))
             dumped = json.dumps(output)
-            self.assertEqual(output["access_token"], REDACTED)
-            self.assertEqual(output["session_id"], "session_123")
+            self.assertEqual(output["result"]["access_token"], REDACTED)
+            self.assertEqual(output["result"]["session_id"], "session_123")
             self.assertNotIn("needle-provider-token", dumped)
             self.assertNotIn("needle-trace-token", dumped)
         finally:
             if old_key is None:
-                os.environ.pop("RTRVR_API_KEY", None)
+                os.environ.pop("HYPERBROWSER_API_KEY", None)
             else:
-                os.environ["RTRVR_API_KEY"] = old_key
+                os.environ["HYPERBROWSER_API_KEY"] = old_key
+            if old_poll is None:
+                os.environ.pop("HYPERBROWSER_POLL_SECONDS", None)
+            else:
+                os.environ["HYPERBROWSER_POLL_SECONDS"] = old_poll
 
     def test_execution_result_redacts_adapter_level_errors_and_metadata(self):
         result = ExecutionResult(
-            provider="browserless",
+            provider="hyperbrowser",
             status="failed",
-            error="Browserless failed at https://example.test/scrape?token=needle-error-token with Bearer needle-error-auth",
+            error="Hyperbrowser failed at https://example.test/scrape?token=needle-error-token with Bearer needle-error-auth",
             artifacts=[
                 {
                     "type": "provider_output",

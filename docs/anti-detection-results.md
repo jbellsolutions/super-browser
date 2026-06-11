@@ -4,6 +4,8 @@
 > **Tested By:** Hermes Agent (via Hermes VPS)  
 > **Purpose:** Determine which providers can bypass which anti-bot protections
 
+> **Lineup note (June 2026):** Browserbase and Rtrvr were removed from the Super Browser lineup after these tests ran. Their results are preserved as historical evidence. Hyperbrowser and Steel (current Tier 2/3) have not yet been through this matrix — re-run before relying on them for anti-bot work.
+
 ---
 
 ## Table of Contents

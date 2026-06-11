@@ -1,6 +1,6 @@
 {
   "goal": "Find companies from a public directory, open each profile, extract company name, website, industry, and contact URL.",
-  "expected_route": ["playwright", "browserbase-stagehand", "browser-use"],
+  "expected_route": ["playwright", "hyperbrowser", "browser-use"],
   "approval_required": false
 }
 

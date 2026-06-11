@@ -192,7 +192,9 @@ class StoreCliMcpTests(unittest.TestCase):
                 [
                     "plan",
                     "--goal",
-                    "Extract titles from https://example.com",
+                    "Fetch this JSON endpoint through raw HTTP",
+                    "--url",
+                    "https://example.com/data.json",
                     "--allow-provider",
                     "decodo-http",
                     "--max-cost-usd",
@@ -234,16 +236,12 @@ class StoreCliMcpTests(unittest.TestCase):
 
     def test_cli_production_readiness_blocks_when_live_providers_unproven(self):
         old_env = {name: os.environ.get(name) for name in [
-            "BROWSERBASE_API_KEY",
-            "BROWSERBASE_PROJECT_ID",
             "BROWSER_USE_API_KEY",
-            "RTRVR_API_KEY",
             "ORGO_API_KEY",
             "ORGO_COMPUTER_ID",
             "AIRTOP_API_KEY",
             "HYPERBROWSER_API_KEY",
             "STEEL_API_KEY",
-            "BROWSERLESS_TOKEN",
             "DECODO_PROXY",
         ]}
         old_state = os.environ.get("SUPER_BROWSER_STATE_DIR")
@@ -277,16 +275,12 @@ class StoreCliMcpTests(unittest.TestCase):
 
     def test_cli_env_checklist_reports_setup_without_secret_values(self):
         env_names = [
-            "BROWSERBASE_API_KEY",
-            "BROWSERBASE_PROJECT_ID",
             "BROWSER_USE_API_KEY",
-            "RTRVR_API_KEY",
             "ORGO_API_KEY",
             "ORGO_COMPUTER_ID",
             "AIRTOP_API_KEY",
             "HYPERBROWSER_API_KEY",
             "STEEL_API_KEY",
-            "BROWSERLESS_TOKEN",
             "DECODO_PROXY",
         ]
         old_env = {name: os.environ.get(name) for name in env_names}
@@ -304,7 +298,7 @@ class StoreCliMcpTests(unittest.TestCase):
             rendered = json.dumps(payload)
             self.assertEqual(payload["type"], "super_browser_env_checklist")
             self.assertFalse(payload["values_included"])
-            self.assertIn("BROWSERBASE_API_KEY", payload["missing_required_env"])
+            self.assertIn("HYPERBROWSER_API_KEY", payload["missing_required_env"])
             self.assertNotIn("super-secret-browser-use-key", rendered)
             self.assertNotIn("super-secret-proxy-pass", rendered)
             browser_use = [item for item in payload["providers"] if item["name"] == "browser-use"][0]
@@ -319,12 +313,27 @@ class StoreCliMcpTests(unittest.TestCase):
             self.assertIn("SUPER_BROWSER_ALLOW_INSECURE_PROVIDER_BASES", global_names)
             self.assertIn("SUPER_BROWSER_APPROVAL_TTL_SECONDS", global_names)
             self.assertTrue(any("production-readiness" in command for command in payload["commands"]))
+            self.assertTrue(any("super-browser setup" in command for command in payload["commands"]))
+            browser_use_signup = next(
+                item for item in payload["provider_signup"] if item["env_var"] == "BROWSER_USE_API_KEY"
+            )
+            self.assertIn("signup_url", browser_use_signup)
         finally:
             for name, value in old_env.items():
                 if value is None:
                     os.environ.pop(name, None)
                 else:
                     os.environ[name] = value
+
+    def test_cli_setup_returns_walkthrough(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = cli_main(["setup", "--client", "cursor"])
+        self.assertEqual(code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["type"], "super_browser_setup_walkthrough")
+        self.assertEqual(len(payload["steps"]), 10)
+        self.assertTrue(any("init-mcp" in command for step in payload["steps"] for command in step.get("commands", [])))
 
     def test_cli_install_skill_copies_self_contained_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -394,7 +403,7 @@ class StoreCliMcpTests(unittest.TestCase):
         self.assertGreater(manifest["file_count"], 20)
         self.assertIn("playwright", manifest["providers"])
         self.assertIn("browser-use", manifest["providers"])
-        self.assertIn("browserbase-stagehand", manifest["providers"])
+        self.assertIn("hyperbrowser", manifest["providers"])
         self.assertIn("super-browser-orchestrator", manifest["skills"])
         self.assertTrue(manifest["required_paths"]["README.md"]["present"])
         self.assertTrue(manifest["required_paths"]["mcp/super-browser-server"]["executable"])
@@ -733,8 +742,8 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertFalse(decodo["production_ready"])
                 self.assertEqual(decodo["production_ready_scope"], "none")
                 self.assertEqual(decodo["certified_workflow_classes"], [])
-                self.assertEqual(decodo["supported_live_workflow_classes"], ["raw_http_direct", "external_write_gate"])
-                self.assertEqual(decodo["uncertified_workflow_classes"], ["raw_http_direct", "external_write_gate"])
+                self.assertEqual(decodo["supported_live_workflow_classes"], ["raw_http_direct"])
+                self.assertEqual(decodo["uncertified_workflow_classes"], ["raw_http_direct"])
                 self.assertTrue(decodo["requires_live_test_before_production"])
                 self.assertFalse(decodo["requires_live_test_before_broader_production"])
                 self.assertTrue(any("DECODO_PROXY" in blocker for blocker in decodo["production_blockers"]))
@@ -776,38 +785,30 @@ class StoreCliMcpTests(unittest.TestCase):
             else:
                 os.environ["SUPER_BROWSER_STATE_DIR"] = old_state
 
-    def test_doctor_requires_browserbase_sdk_and_playwright_for_browserbase_adapter(self):
-        old_api_key = os.environ.get("BROWSERBASE_API_KEY")
-        old_project_id = os.environ.get("BROWSERBASE_PROJECT_ID")
+    def test_doctor_requires_playwright_for_steel_adapter(self):
+        old_api_key = os.environ.get("STEEL_API_KEY")
         try:
-            os.environ["BROWSERBASE_API_KEY"] = "test-browserbase-key"
-            os.environ["BROWSERBASE_PROJECT_ID"] = "test-browserbase-project"
+            os.environ["STEEL_API_KEY"] = "test-steel-key"
 
             def fake_find_spec(name):
-                if name == "browserbase":
-                    return object()
                 if name == "playwright.sync_api":
                     return None
-                return None
+                return object()
 
             with patch("super_browser.providers.importlib.util.find_spec", side_effect=fake_find_spec):
                 payload = handle_tool("browser_doctor", {})
 
-            browserbase = {provider["name"]: provider for provider in payload["providers"]}["browserbase-stagehand"]
-            self.assertEqual(browserbase["readiness_status"], "package_missing")
-            self.assertFalse(browserbase["usable_now"])
-            self.assertFalse(browserbase["configured"])
-            self.assertFalse(browserbase["python_package_available"])
-            self.assertIn("provider package or CLI is missing", browserbase["production_blockers"])
+            steel = {provider["name"]: provider for provider in payload["providers"]}["steel"]
+            self.assertEqual(steel["readiness_status"], "package_missing")
+            self.assertFalse(steel["usable_now"])
+            self.assertFalse(steel["configured"])
+            self.assertFalse(steel["python_package_available"])
+            self.assertIn("provider package or CLI is missing", steel["production_blockers"])
         finally:
             if old_api_key is None:
-                os.environ.pop("BROWSERBASE_API_KEY", None)
+                os.environ.pop("STEEL_API_KEY", None)
             else:
-                os.environ["BROWSERBASE_API_KEY"] = old_api_key
-            if old_project_id is None:
-                os.environ.pop("BROWSERBASE_PROJECT_ID", None)
-            else:
-                os.environ["BROWSERBASE_PROJECT_ID"] = old_project_id
+                os.environ["STEEL_API_KEY"] = old_api_key
 
     def test_doctor_and_production_gate_block_playwright_when_browser_runtime_is_missing(self):
         old_state = os.environ.get("SUPER_BROWSER_STATE_DIR")
@@ -1482,7 +1483,7 @@ class StoreCliMcpTests(unittest.TestCase):
         self.assertEqual(payload["primary_provider"], "orgo")
         self.assertIn("council_report", payload)
         self.assertEqual(payload["council_report"]["mode"], "council")
-        self.assertIn("ORGO_COMPUTER_ID", payload["council_report"]["planner_decision"]["missing_env"])
+        self.assertNotIn("ORGO_COMPUTER_ID", payload["council_report"]["planner_decision"]["missing_env"])
 
     def test_mcp_tools_expose_input_schemas(self):
         tools = {tool["name"]: tool for tool in TOOLS}
@@ -1517,6 +1518,8 @@ class StoreCliMcpTests(unittest.TestCase):
         self.assertIn("raw_http_direct", workflow_enum)
         self.assertIn("authenticated_read", workflow_enum)
         self.assertIn("external_write_gate", workflow_enum)
+        self.assertIn("authenticated_write_profile", workflow_enum)
+        self.assertIn("fleet_read", workflow_enum)
         self.assertTrue(tools["get_browser_run"]["annotations"]["readOnlyHint"])
         self.assertTrue(tools["handoff_browser_run"]["annotations"]["readOnlyHint"])
         self.assertTrue(tools["list_browser_runs"]["annotations"]["readOnlyHint"])
@@ -1529,16 +1532,12 @@ class StoreCliMcpTests(unittest.TestCase):
 
     def test_mcp_production_readiness_reports_blockers(self):
         old_env = {name: os.environ.get(name) for name in [
-            "BROWSERBASE_API_KEY",
-            "BROWSERBASE_PROJECT_ID",
             "BROWSER_USE_API_KEY",
-            "RTRVR_API_KEY",
             "ORGO_API_KEY",
             "ORGO_COMPUTER_ID",
             "AIRTOP_API_KEY",
             "HYPERBROWSER_API_KEY",
             "STEEL_API_KEY",
-            "BROWSERLESS_TOKEN",
             "DECODO_PROXY",
         ]}
         old_state = os.environ.get("SUPER_BROWSER_STATE_DIR")
@@ -1550,8 +1549,8 @@ class StoreCliMcpTests(unittest.TestCase):
                 payload = handle_tool("production_readiness", {})
 
             self.assertFalse(payload["production_ready"])
-            self.assertIn("browserbase-stagehand", payload["blocked_providers"])
-            self.assertIn("BROWSERBASE_API_KEY", payload["missing_env"])
+            self.assertIn("browser-use", payload["blocked_providers"])
+            self.assertIn("BROWSER_USE_API_KEY", payload["missing_env"])
             self.assertIn("playwright", payload["ready_providers"])
             self.assertIn("decodo-http", payload["uncertified_providers"])
         finally:
@@ -1589,6 +1588,12 @@ class StoreCliMcpTests(unittest.TestCase):
         self.assertIn("BROWSER_USE_API_KEY", {item["name"] for item in payload["all_env"]})
         self.assertIn("production-readiness", " ".join(payload["commands"]))
         self.assertNotIn("=", json.dumps(payload["all_env"]))
+
+    def test_mcp_setup_walkthrough_returns_steps(self):
+        payload = handle_tool("setup_walkthrough", {"client": "codex"})
+        self.assertEqual(payload["type"], "super_browser_setup_walkthrough")
+        self.assertGreaterEqual(len(payload["provider_signup"]), 5)
+        self.assertEqual(payload["client_hint"], "codex")
 
     def test_production_readiness_keeps_playwright_locally_ready_after_partial_live_evidence(self):
         old_state = os.environ.get("SUPER_BROWSER_STATE_DIR")
@@ -2097,9 +2102,9 @@ class StoreCliMcpTests(unittest.TestCase):
     def test_mcp_plan_honors_provider_constraints(self):
         payload = handle_tool(
             "plan_browser_task",
-            {"goal": "Extract titles from https://example.com", "providers_allowed": ["browserless"], "max_cost_usd": 0.05, "timeout_seconds": 12},
+            {"goal": "Extract titles from https://example.com", "providers_allowed": ["steel"], "max_cost_usd": 0.05, "timeout_seconds": 12},
         )
-        self.assertEqual(payload["primary_provider"], "browserless")
+        self.assertEqual(payload["primary_provider"], "steel")
         self.assertEqual(payload["fallback_providers"], [])
         self.assertEqual(payload["council_report"]["planner_decision"]["max_cost_usd"], 0.05)
         self.assertEqual(payload["council_report"]["planner_decision"]["timeout_seconds"], 12)
@@ -2139,7 +2144,7 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertEqual(decodo["production_ready_scope"], "none")
                 self.assertEqual(decodo["certified_workflow_classes"], [])
                 self.assertEqual(decodo["stale_certified_workflow_classes"], [])
-                self.assertEqual(decodo["uncertified_workflow_classes"], ["raw_http_direct", "external_write_gate"])
+                self.assertEqual(decodo["uncertified_workflow_classes"], ["raw_http_direct"])
                 self.assertEqual(decodo["ignored_unsupported_evidence_workflow_classes"], [])
                 self.assertEqual(decodo["ignored_provider_mismatch_evidence_workflow_classes"], [])
         finally:
@@ -2194,7 +2199,7 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertEqual(decodo["stale_certified_workflow_classes"], [])
                 self.assertEqual(decodo["ignored_provider_mismatch_evidence_workflow_classes"], ["raw_http_direct"])
                 self.assertEqual(decodo["ignored_unsupported_evidence_workflow_classes"], [])
-                self.assertEqual(decodo["uncertified_workflow_classes"], ["raw_http_direct", "external_write_gate"])
+                self.assertEqual(decodo["uncertified_workflow_classes"], ["raw_http_direct"])
                 self.assertTrue(any("provider-mismatched live-test evidence" in blocker for blocker in decodo["production_blockers"]))
                 self.assertTrue(any("raw_http_direct" in blocker for blocker in decodo["production_blockers"]))
         finally:
@@ -2223,17 +2228,8 @@ class StoreCliMcpTests(unittest.TestCase):
                             "recorded_at": recorded_at,
                             "workflow_class": "raw_http_direct",
                             "certification_scope": "workflow_class",
-                            "certified_workflow_classes": ["raw_http_direct", "external_write_gate"],
+                            "certified_workflow_classes": ["raw_http_direct"],
                             "latest_by_workflow_class": {
-                                "external_write_gate": {
-                                    "provider": "browser-use",
-                                    "requested_provider": "all",
-                                    "status": "passed",
-                                    "recorded_at": recorded_at,
-                                    "workflow_class": "external_write_gate",
-                                    "certification_scope": "workflow_class",
-                                    "certified_workflow_classes": ["external_write_gate"],
-                                },
                                 "raw_http_direct": {
                                     "provider": "decodo-http",
                                     "requested_provider": "all",
@@ -2256,13 +2252,11 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertEqual(decodo["production_ready_scope"], "workflow_class:raw_http_direct")
                 self.assertEqual(decodo["certified_workflow_classes"], ["raw_http_direct"])
                 self.assertEqual(decodo["stale_certified_workflow_classes"], [])
-                self.assertEqual(decodo["ignored_provider_mismatch_evidence_workflow_classes"], ["external_write_gate"])
+                self.assertEqual(decodo["ignored_provider_mismatch_evidence_workflow_classes"], [])
                 self.assertEqual(decodo["ignored_unsupported_evidence_workflow_classes"], [])
-                self.assertEqual(decodo["uncertified_workflow_classes"], ["external_write_gate"])
+                self.assertEqual(decodo["uncertified_workflow_classes"], [])
                 self.assertFalse(decodo["requires_live_test_before_production"])
-                self.assertTrue(decodo["requires_live_test_before_broader_production"])
-                self.assertTrue(any("provider-mismatched live-test evidence" in blocker for blocker in decodo["production_blockers"]))
-                self.assertTrue(any("external_write_gate" in blocker for blocker in decodo["production_blockers"]))
+                self.assertFalse(decodo["requires_live_test_before_broader_production"])
         finally:
             if old_proxy is not None:
                 os.environ["DECODO_PROXY"] = old_proxy
@@ -2314,7 +2308,7 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertEqual(decodo["certified_workflow_classes"], [])
                 self.assertEqual(decodo["stale_certified_workflow_classes"], [])
                 self.assertEqual(decodo["ignored_unsupported_evidence_workflow_classes"], ["general_read"])
-                self.assertEqual(decodo["uncertified_workflow_classes"], ["raw_http_direct", "external_write_gate"])
+                self.assertEqual(decodo["uncertified_workflow_classes"], ["raw_http_direct"])
                 self.assertTrue(any("unsupported live-test evidence" in blocker for blocker in decodo["production_blockers"]))
                 self.assertTrue(any("raw_http_direct" in blocker for blocker in decodo["production_blockers"]))
         finally:
@@ -2377,11 +2371,9 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertEqual(decodo["certified_workflow_classes"], ["raw_http_direct"])
                 self.assertEqual(decodo["stale_certified_workflow_classes"], [])
                 self.assertEqual(decodo["ignored_unsupported_evidence_workflow_classes"], ["general_read"])
-                self.assertEqual(decodo["uncertified_workflow_classes"], ["external_write_gate"])
+                self.assertEqual(decodo["uncertified_workflow_classes"], [])
                 self.assertFalse(decodo["requires_live_test_before_production"])
-                self.assertTrue(decodo["requires_live_test_before_broader_production"])
-                self.assertTrue(any("unsupported live-test evidence" in blocker for blocker in decodo["production_blockers"]))
-                self.assertTrue(any("external_write_gate" in blocker for blocker in decodo["production_blockers"]))
+                self.assertFalse(decodo["requires_live_test_before_broader_production"])
         finally:
             if old_proxy is not None:
                 os.environ["DECODO_PROXY"] = old_proxy
@@ -2414,11 +2406,10 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertEqual(decodo["latest_live_test"]["workflow_class"], "raw_http_direct")
                 self.assertEqual(decodo["latest_live_test"]["certification_scope"], "workflow_class")
                 self.assertEqual(decodo["latest_live_test"]["certified_workflow_classes"], ["raw_http_direct"])
-                self.assertEqual(decodo["supported_live_workflow_classes"], ["raw_http_direct", "external_write_gate"])
-                self.assertEqual(decodo["uncertified_workflow_classes"], ["external_write_gate"])
+                self.assertEqual(decodo["supported_live_workflow_classes"], ["raw_http_direct"])
+                self.assertEqual(decodo["uncertified_workflow_classes"], [])
                 self.assertFalse(decodo["requires_live_test_before_production"])
-                self.assertTrue(decodo["requires_live_test_before_broader_production"])
-                self.assertTrue(any("external_write_gate" in blocker for blocker in decodo["production_blockers"]))
+                self.assertFalse(decodo["requires_live_test_before_broader_production"])
                 self.assertIn("DECODO_PROXY", decodo["missing_optional_env"])
                 self.assertIn("raw_http_direct", decodo["production_gate"])
         finally:
@@ -2440,29 +2431,27 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertEqual(raw_http["evidence"]["written"][0]["certified_workflow_classes"], ["raw_http_direct"])
 
                 write_gate = handle_tool("run_browser_live_tests", {"provider": "decodo-http", "workflow_class": "external_write_gate"})
-                self.assertEqual(write_gate["status"], "passed")
-                self.assertEqual(write_gate["evidence"]["written"][0]["certified_workflow_classes"], ["external_write_gate", "raw_http_direct"])
+                self.assertEqual(write_gate["status"], "failed")
+                self.assertTrue(write_gate["results"][0]["unsupported_workflow_class"])
 
                 evidence_path = os.path.join(tmp, "live-tests", "decodo-http.json")
                 with open(evidence_path, encoding="utf-8") as handle:
                     evidence = json.load(handle)
-                self.assertEqual(list(evidence["latest_by_workflow_class"]), ["external_write_gate", "raw_http_direct"])
+                self.assertEqual(list(evidence["latest_by_workflow_class"]), ["raw_http_direct"])
 
                 doctor = handle_tool("browser_doctor", {})
                 providers = {provider["name"]: provider for provider in doctor["providers"]}
                 decodo = providers["decodo-http"]
                 self.assertEqual(decodo["readiness_status"], "live_test_passed")
-                self.assertEqual(decodo["production_ready_scope"], "workflow_class:external_write_gate,raw_http_direct")
-                self.assertEqual(decodo["certified_workflow_classes"], ["external_write_gate", "raw_http_direct"])
+                self.assertEqual(decodo["production_ready_scope"], "workflow_class:raw_http_direct")
+                self.assertEqual(decodo["certified_workflow_classes"], ["raw_http_direct"])
                 self.assertEqual(decodo["uncertified_workflow_classes"], [])
                 self.assertFalse(decodo["requires_live_test_before_broader_production"])
-                self.assertEqual(decodo["latest_live_test"]["workflow_class"], "external_write_gate")
-                self.assertEqual(decodo["latest_live_test"]["certified_workflow_classes"], ["external_write_gate", "raw_http_direct"])
+                self.assertEqual(decodo["latest_live_test"]["workflow_class"], "raw_http_direct")
+                self.assertEqual(decodo["latest_live_test"]["certified_workflow_classes"], ["raw_http_direct"])
                 by_class = decodo["latest_live_test"]["latest_by_workflow_class"]
                 self.assertEqual(by_class["raw_http_direct"]["status"], "passed")
                 self.assertTrue(by_class["raw_http_direct"]["fresh"])
-                self.assertEqual(by_class["external_write_gate"]["status"], "passed")
-                self.assertTrue(by_class["external_write_gate"]["fresh"])
         finally:
             if old_proxy is not None:
                 os.environ["DECODO_PROXY"] = old_proxy
@@ -2673,7 +2662,7 @@ class StoreCliMcpTests(unittest.TestCase):
                 self.assertFalse(payload["evidence"]["recorded"])
                 self.assertEqual(payload["evidence"]["reason"], "unsupported_workflow_class")
                 self.assertEqual(payload["results"][0]["workflow_class"], "general_read")
-                self.assertEqual(payload["results"][0]["supported_workflow_classes"], ["raw_http_direct", "external_write_gate"])
+                self.assertEqual(payload["results"][0]["supported_workflow_classes"], ["raw_http_direct"])
                 self.assertTrue(payload["results"][0]["unsupported_workflow_class"])
                 self.assertFalse(os.path.exists(os.path.join(tmp, "live-tests")))
         finally:
@@ -2760,27 +2749,27 @@ class StoreCliMcpTests(unittest.TestCase):
                 os.environ.pop("HYPERBROWSER_API_KEY", None)
 
     def test_provider_live_test_approves_policy_gated_provider_through_runtime(self):
-        old_key = os.environ.get("RTRVR_API_KEY")
+        old_key = os.environ.get("BROWSER_USE_API_KEY")
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 os.environ["SUPER_BROWSER_STATE_DIR"] = tmp
-                os.environ["RTRVR_API_KEY"] = "test-key"
-                plan = build_plan(infer_task("Use the available browser session to read https://example.com and report the page title", url="https://example.com", providers_allowed=["rtrvr"]))
+                os.environ["BROWSER_USE_API_KEY"] = "test-key"
+                plan = build_plan(infer_task("Use the available browser session to read https://example.com and report the page title", url="https://example.com", providers_allowed=["browser-use"]))
                 planned = RunState.create(plan, status="awaiting_approval")
                 planned.approvals.append(approval_request_from_plan(plan))
                 complete = RunState.create(plan, status="complete")
                 complete.run_id = planned.run_id
-                complete.verification = {"selected_provider": "rtrvr", "checks": ["approved runtime lifecycle"]}
+                complete.verification = {"selected_provider": "browser-use", "checks": ["approved runtime lifecycle"]}
                 complete.approvals = planned.approvals
 
                 with patch("super_browser.live_tests.create_run", return_value=planned) as create_mock:
                     with patch("super_browser.live_tests.approve_run", return_value=complete) as approve_mock:
                         with patch("super_browser.live_tests.resume_run") as resume_mock:
-                            payload = handle_tool("run_browser_live_tests", {"provider": "rtrvr"})
+                            payload = handle_tool("run_browser_live_tests", {"provider": "browser-use"})
 
                 self.assertEqual(payload["status"], "passed")
                 create_mock.assert_called_once()
-                self.assertEqual(create_mock.call_args.kwargs["providers_allowed"], ["rtrvr"])
+                self.assertEqual(create_mock.call_args.kwargs["providers_allowed"], ["browser-use"])
                 self.assertFalse(create_mock.call_args.kwargs["execute"])
                 approve_mock.assert_called_once()
                 self.assertEqual(approve_mock.call_args.args[0], planned.run_id)
@@ -2789,9 +2778,9 @@ class StoreCliMcpTests(unittest.TestCase):
                 resume_mock.assert_not_called()
         finally:
             if old_key is not None:
-                os.environ["RTRVR_API_KEY"] = old_key
+                os.environ["BROWSER_USE_API_KEY"] = old_key
             else:
-                os.environ.pop("RTRVR_API_KEY", None)
+                os.environ.pop("BROWSER_USE_API_KEY", None)
 
     def test_mcp_fixture_live_tests_cover_required_scenarios(self):
         payload = handle_tool("run_browser_live_tests", {"provider": "fixtures"})

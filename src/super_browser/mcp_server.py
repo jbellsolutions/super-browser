@@ -9,8 +9,10 @@ from typing import Any
 
 from .bundle import build_bundle_manifest
 from .env_checklist import environment_checklist
+from .fleet import create_fleet_runs
 from .models import RUN_STATUS_VALUES
 from .production import production_readiness
+from .profiles import ProfileStore
 from .providers import PROVIDERS, list_providers, provider_readiness
 from .redaction import redact, redact_text, safe_json_dumps
 from .router import build_plan, infer_task
@@ -19,6 +21,7 @@ from .store import RunStore
 from .handoff import build_handoff
 from .live_tests import WORKFLOW_CLASSES, run_live_tests
 from .setup_helpers import discover_repo_root, install_skill_bundle, is_super_browser_root, mcp_config, write_mcp_config
+from .setup_walkthrough import launch_setup
 from .verifier import verify_run
 
 
@@ -31,7 +34,7 @@ SERVER_INSTRUCTIONS = (
     "Use get_browser_run and list_browser_runs for read-only run lookup. "
     "Use resources/list and resources/read for provider docs and routing playbooks. "
     "Use bundle_manifest before handoff or release audits. "
-    "Use env_checklist to report required setup without exposing secret values. "
+    "Use setup_walkthrough or env_checklist for first-time install without exposing secret values. "
     "External writes and credential-bearing work must stop for approval."
 )
 
@@ -71,6 +74,16 @@ RESOURCE_FILES = {
         "name": "Live Test Matrix",
         "description": "Fixture and provider live-test scenarios and gating rules.",
     },
+    "super-browser://docs/setup-walkthrough": {
+        "path": "docs/setup-walkthrough.md",
+        "name": "Setup Walkthrough",
+        "description": "Step-by-step onboarding for new users: clone, install, API keys, skills, MCP, doctor.",
+    },
+    "super-browser://docs/agent-quickstart": {
+        "path": "docs/agent-quickstart.md",
+        "name": "Agent Quickstart",
+        "description": "Drop-in quickstart when an agent receives the GitHub repo link.",
+    },
 }
 
 
@@ -100,6 +113,8 @@ PLAN_INPUT_SCHEMA = {
         },
         "max_cost_usd": {"type": "number", "minimum": 0, "description": "Optional routing cost ceiling."},
         "timeout_seconds": {"type": "integer", "minimum": 1, "description": "Optional provider execution timeout in seconds."},
+        "profile": {"type": "string", "minLength": 1, "description": "Named persistent browser profile from ProfileStore."},
+        "proxy": {"type": "string", "minLength": 1, "description": "Proxy hint (decodo/auto/sticky or full proxy URL)."},
     },
     "required": ["goal"],
     "additionalProperties": False,
@@ -110,8 +125,27 @@ RUN_INPUT_SCHEMA = {
     "properties": {
         **PLAN_INPUT_SCHEMA["properties"],
         "execute": {"type": "boolean", "default": True, "description": "Whether to execute immediately when policy allows."},
+        "fleet_size": {"type": "integer", "minimum": 2, "maximum": 10, "description": "Create 2-10 coordinated fleet runs with per-member profiles."},
     },
     "required": ["goal"],
+    "additionalProperties": False,
+}
+
+PROFILE_NAME_SCHEMA = {
+    "type": "object",
+    "properties": {"name": {"type": "string", "minLength": 1, "description": "Profile name."}},
+    "required": ["name"],
+    "additionalProperties": False,
+}
+
+CREATE_PROFILE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "default": ""},
+        "preferred_provider": {"type": "string", "enum": PROVIDER_NAMES},
+    },
+    "required": ["name"],
     "additionalProperties": False,
 }
 
@@ -162,6 +196,18 @@ PRODUCTION_READINESS_INPUT_SCHEMA = {
 BUNDLE_MANIFEST_INPUT_SCHEMA = _empty_schema()
 ENV_CHECKLIST_INPUT_SCHEMA = _empty_schema()
 
+SETUP_WALKTHROUGH_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "client": {
+            "type": "string",
+            "enum": ["cursor", "codex", "claude"],
+            "description": "Optional agent client hint to tailor install-skill and init-mcp commands.",
+        }
+    },
+    "additionalProperties": False,
+}
+
 INSTALL_SKILL_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -208,9 +254,14 @@ TOOL_INPUT_SCHEMAS = {
     "production_readiness": PRODUCTION_READINESS_INPUT_SCHEMA,
     "bundle_manifest": BUNDLE_MANIFEST_INPUT_SCHEMA,
     "env_checklist": ENV_CHECKLIST_INPUT_SCHEMA,
+    "setup_walkthrough": SETUP_WALKTHROUGH_INPUT_SCHEMA,
     "run_browser_live_tests": LIVE_TEST_INPUT_SCHEMA,
     "install_super_browser_skill": INSTALL_SKILL_INPUT_SCHEMA,
     "init_super_browser_mcp": INIT_MCP_INPUT_SCHEMA,
+    "list_browser_profiles": _empty_schema(),
+    "get_browser_profile": PROFILE_NAME_SCHEMA,
+    "create_browser_profile": CREATE_PROFILE_INPUT_SCHEMA,
+    "delete_browser_profile": PROFILE_NAME_SCHEMA,
 }
 
 TOOL_DESCRIPTIONS = {
@@ -228,9 +279,14 @@ TOOL_DESCRIPTIONS = {
     "production_readiness": "Return a hard production-readiness gate with missing env vars, uncertified workflow classes, and provider blockers.",
     "bundle_manifest": "Return a hashed inventory of the installed Super Browser bundle for agent handoff and release audits.",
     "env_checklist": "Return required and optional Super Browser environment variable setup without secret values.",
+    "setup_walkthrough": "Return a step-by-step install walkthrough with signup links, skills, MCP, and doctor commands.",
     "run_browser_live_tests": "Run gated local/provider live tests and return artifact evidence.",
     "install_super_browser_skill": "Install or describe a self-contained Super Browser skill/plugin bundle for another agent.",
     "init_super_browser_mcp": "Generate, write, or merge MCP config for the Super Browser server.",
+    "list_browser_profiles": "List named persistent browser profiles.",
+    "get_browser_profile": "Return one named browser profile.",
+    "create_browser_profile": "Create a named persistent browser profile.",
+    "delete_browser_profile": "Delete a named persistent browser profile.",
 }
 
 TOOL_ANNOTATIONS = {
@@ -248,9 +304,14 @@ TOOL_ANNOTATIONS = {
     "production_readiness": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
     "bundle_manifest": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
     "env_checklist": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    "setup_walkthrough": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
     "run_browser_live_tests": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
     "install_super_browser_skill": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
     "init_super_browser_mcp": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
+    "list_browser_profiles": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    "get_browser_profile": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    "create_browser_profile": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    "delete_browser_profile": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
 }
 
 TOOLS = [
@@ -269,26 +330,35 @@ def handle_tool(name: str, args: dict[str, Any]) -> Any:
     return redact(_handle_tool(name, args))
 
 
+def _task_kwargs(args: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "url": args.get("url"),
+        "optimize": args.get("optimize", "balanced"),
+        "providers_allowed": args.get("providers_allowed"),
+        "max_cost_usd": args.get("max_cost_usd"),
+        "timeout_seconds": args.get("timeout_seconds"),
+        "profile": args.get("profile"),
+        "proxy": args.get("proxy"),
+    }
+
+
 def _handle_tool(name: str, args: dict[str, Any]) -> Any:
     if name == "plan_browser_task":
-        task = infer_task(
-            args["goal"],
-            url=args.get("url"),
-            optimize=args.get("optimize", "balanced"),
-            providers_allowed=args.get("providers_allowed"),
-            max_cost_usd=args.get("max_cost_usd"),
-            timeout_seconds=args.get("timeout_seconds"),
-        )
+        task = infer_task(args["goal"], **_task_kwargs(args))
         return build_plan(task).to_dict()
     if name == "run_browser_task":
+        fleet_size = args.get("fleet_size")
+        if fleet_size:
+            return create_fleet_runs(
+                args["goal"],
+                fleet_size=fleet_size,
+                execute=args.get("execute", True),
+                **_task_kwargs(args),
+            )
         run = create_run(
             args["goal"],
-            url=args.get("url"),
-            optimize=args.get("optimize", "balanced"),
             execute=args.get("execute", True),
-            providers_allowed=args.get("providers_allowed"),
-            max_cost_usd=args.get("max_cost_usd"),
-            timeout_seconds=args.get("timeout_seconds"),
+            **_task_kwargs(args),
         )
         return run.to_dict()
     if name == "resume_browser_run":
@@ -327,6 +397,8 @@ def _handle_tool(name: str, args: dict[str, Any]) -> Any:
         return build_bundle_manifest()
     if name == "env_checklist":
         return environment_checklist()
+    if name == "setup_walkthrough":
+        return launch_setup(client=args.get("client"))
     if name == "run_browser_live_tests":
         return run_live_tests(args.get("provider", "local"), workflow_class=args.get("workflow_class", "default"))
     if name == "install_super_browser_skill":
@@ -340,6 +412,25 @@ def _handle_tool(name: str, args: dict[str, Any]) -> Any:
                 cwd=args.get("cwd"),
             )
         return mcp_config(cwd=args.get("cwd"))
+    if name == "list_browser_profiles":
+        return [item.to_dict() for item in ProfileStore(create=False).list()]
+    if name == "get_browser_profile":
+        profile = ProfileStore(create=False).get(args["name"])
+        if not profile:
+            raise ValueError(f"Profile not found: {args['name']}")
+        return profile.to_dict()
+    if name == "create_browser_profile":
+        profile = ProfileStore().create(
+            args["name"],
+            description=args.get("description", ""),
+            preferred_provider=args.get("preferred_provider"),
+        )
+        return profile.to_dict()
+    if name == "delete_browser_profile":
+        deleted = ProfileStore().delete(args["name"])
+        if not deleted:
+            raise ValueError(f"Profile not found: {args['name']}")
+        return {"deleted": args["name"]}
     raise ValueError(f"Unknown tool: {name}")
 
 

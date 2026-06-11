@@ -17,9 +17,8 @@ def _has_module(name: str) -> bool:
 
 
 SUPPORTED_LIVE_WORKFLOW_CLASSES = {
-    "decodo-http": ["raw_http_direct", "external_write_gate"],
+    "decodo-http": ["raw_http_direct"],
     "playwright": ["local_browser_fixture", "external_write_gate"],
-    "rtrvr": ["authenticated_read", "external_write_gate"],
     "orgo": ["desktop_read", "external_write_gate"],
 }
 DEFAULT_REMOTE_LIVE_WORKFLOW_CLASSES = ["general_read", "external_write_gate"]
@@ -35,18 +34,7 @@ PROVIDERS: dict[str, ProviderCapability] = {
         best_for=["deterministic local browser control", "testing", "simple extraction", "known selectors"],
         avoid_when=["advanced anti-bot is present", "a logged-in personal Chrome session is required"],
         supports_long_running=True,
-    ),
-    "browserbase-stagehand": ProviderCapability(
-        name="browserbase-stagehand",
-        display_name="Browserbase + Stagehand",
-        stability="stable",
-        cost_band="variable",
-        env_vars=["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
-        docs_url="https://docs.browserbase.com/integrations/mcp/introduction",
-        best_for=["cloud browser sessions", "contexts", "general web workflows", "natural-language actions"],
-        avoid_when=["the site has proven advanced bot detection and Browser Use is available"],
-        supports_auth=True,
-        supports_long_running=True,
+        supports_proxy_injection=True,
     ),
     "browser-use": ProviderCapability(
         name="browser-use",
@@ -60,24 +48,15 @@ PROVIDERS: dict[str, ProviderCapability] = {
         supports_auth=True,
         supports_anti_bot=True,
         supports_long_running=True,
-    ),
-    "rtrvr": ProviderCapability(
-        name="rtrvr",
-        display_name="Rtrvr",
-        stability="stable",
-        cost_band="variable",
-        env_vars=["RTRVR_API_KEY"],
-        docs_url="https://www.rtrvr.ai/docs/cli",
-        best_for=["logged-in local Chrome sessions", "extension-based authenticated browsing", "MCP-native browser tasks"],
-        avoid_when=["no local Chrome profile is available", "high-volume work would be cheaper in another backend"],
-        supports_auth=True,
+        supports_captcha=True,
+        supports_profiles=True,
     ),
     "orgo": ProviderCapability(
         name="orgo",
         display_name="Orgo Computer",
         stability="stable",
         cost_band="medium",
-        env_vars=["ORGO_API_KEY", "ORGO_COMPUTER_ID"],
+        env_vars=["ORGO_API_KEY"],
         docs_url="https://docs.orgo.ai/api-reference/introduction",
         best_for=["full desktop workflows", "multi-window work", "files plus browser", "computer-use fallback"],
         avoid_when=["a browser-only API can complete the task cheaply"],
@@ -95,6 +74,7 @@ PROVIDERS: dict[str, ProviderCapability] = {
         avoid_when=["you need a local open-source runtime", "the task must be MCP-native without a wrapper", "a free local browser is enough"],
         supports_auth=True,
         supports_long_running=True,
+        supports_profiles=True,
     ),
     "decodo-http": ProviderCapability(
         name="decodo-http",
@@ -118,6 +98,10 @@ PROVIDERS: dict[str, ProviderCapability] = {
         avoid_when=["the workflow has not passed live tests yet"],
         supports_auth=True,
         supports_long_running=True,
+        supports_captcha=True,
+        supports_profiles=True,
+        supports_proxy_injection=True,
+        supports_fleet=True,
     ),
     "steel": ProviderCapability(
         name="steel",
@@ -130,17 +114,10 @@ PROVIDERS: dict[str, ProviderCapability] = {
         avoid_when=["the workflow has not passed live tests yet"],
         supports_auth=True,
         supports_long_running=True,
-    ),
-    "browserless": ProviderCapability(
-        name="browserless",
-        display_name="Browserless",
-        stability="evaluating",
-        cost_band="variable",
-        env_vars=["BROWSERLESS_TOKEN"],
-        docs_url="https://docs.browserless.io/",
-        best_for=["hosted browserless/chromium infrastructure", "Puppeteer or Playwright CDP control"],
-        avoid_when=["natural-language agent actions are needed without building them"],
-        supports_long_running=True,
+        supports_captcha=True,
+        supports_profiles=True,
+        supports_proxy_injection=True,
+        supports_fleet=True,
     ),
 }
 
@@ -161,20 +138,14 @@ def provider_readiness() -> list[dict]:
     for provider in PROVIDERS.values():
         missing = [name for name in provider.env_vars if not os.environ.get(name)]
         cli = None
-        if provider.name == "rtrvr":
-            cli = bool(shutil.which("rtrvr"))
-        elif provider.name == "playwright":
+        if provider.name == "playwright":
             cli = bool(shutil.which("playwright"))
         package = None
         if provider.name == "playwright":
             package = _has_module("playwright.sync_api")
-        elif provider.name == "browserbase-stagehand":
-            package = _has_module("browserbase") and _has_module("playwright.sync_api")
         elif provider.name == "browser-use":
             package = _has_module("browser_use_sdk")
-        elif provider.name == "orgo":
-            package = True
-        elif provider.name in {"airtop", "hyperbrowser", "browserless"}:
+        elif provider.name in {"orgo", "airtop", "hyperbrowser"}:
             package = True
         elif provider.name == "steel":
             package = _has_module("playwright.sync_api")

@@ -347,14 +347,14 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(host, "unresolved.example.test")
             raise OSError("simulated DNS failure")
 
-        old_token = os.environ.get("BROWSERLESS_TOKEN")
+        old_token = os.environ.get("HYPERBROWSER_API_KEY")
         try:
-            os.environ["BROWSERLESS_TOKEN"] = "test-token"
+            os.environ["HYPERBROWSER_API_KEY"] = "test-token"
             plan = build_plan(
                 infer_task(
                     "Extract titles from this page",
                     url="https://unresolved.example.test/page",
-                    providers_allowed=["browserless"],
+                    providers_allowed=["hyperbrowser"],
                 )
             )
             with tempfile.TemporaryDirectory() as tmp:
@@ -364,7 +364,7 @@ class ExecutionTests(unittest.TestCase):
                 payload = result.to_dict()
                 self.assertEqual(payload["status"], "blocked")
                 self.assertFalse(http_mock.called)
-                self.assertEqual(payload["provider"], "browserless")
+                self.assertEqual(payload["provider"], "hyperbrowser")
                 self.assertIn("public target DNS resolution failed", payload["verification"]["checks"])
                 metadata_artifact = next(item for item in payload["artifacts"] if item["type"] == "metadata")
                 with open(metadata_artifact["path"], encoding="utf-8") as handle:
@@ -373,9 +373,9 @@ class ExecutionTests(unittest.TestCase):
                 self.assertEqual(metadata["target_evidence"]["resolution_error"], "simulated DNS failure")
         finally:
             if old_token is None:
-                os.environ.pop("BROWSERLESS_TOKEN", None)
+                os.environ.pop("HYPERBROWSER_API_KEY", None)
             else:
-                os.environ["BROWSERLESS_TOKEN"] = old_token
+                os.environ["HYPERBROWSER_API_KEY"] = old_token
 
     def test_playwright_blocks_browser_request_to_sensitive_target_scope(self):
         seen = {}
@@ -602,13 +602,10 @@ class ExecutionTests(unittest.TestCase):
     def test_remote_url_providers_preflight_public_hostname_resolution(self):
         provider_envs = {
             "browser-use": {"BROWSER_USE_API_KEY": "browser-use-test-key"},
-            "rtrvr": {"RTRVR_API_KEY": "rtrvr-test-key"},
-            "browserbase-stagehand": {"BROWSERBASE_API_KEY": "bb-test-key", "BROWSERBASE_PROJECT_ID": "project-test"},
             "orgo": {"ORGO_API_KEY": "orgo-test-key", "ORGO_COMPUTER_ID": "computer-test"},
             "airtop": {"AIRTOP_API_KEY": "airtop-test-key"},
             "hyperbrowser": {"HYPERBROWSER_API_KEY": "hyperbrowser-test-key"},
             "steel": {"STEEL_API_KEY": "steel-test-key"},
-            "browserless": {"BROWSERLESS_TOKEN": "browserless-test-token"},
         }
 
         def fake_getaddrinfo(host, port, type=0):
@@ -980,15 +977,15 @@ class ExecutionTests(unittest.TestCase):
                     {
                         "run_id": run.run_id,
                         "plan_sha256": plan_fingerprint(run.plan),
-                        "final_provider": "browserless",
+                        "final_provider": "steel",
                         "final_status": "failed",
-                        "attempts": [{"order": 1, "provider": "browserless", "status": "failed", "error": "simulated failure"}],
+                        "attempts": [{"order": 1, "provider": "steel", "status": "failed", "error": "simulated failure"}],
                     },
                     handle,
                 )
             run.status = "failed"
-            run.artifacts.append({"type": "run_report", "provider": "browserless", "path": report_path})
-            run.verification = {"confidence": "medium", "selected_provider": "browserless", "checks": ["simulated inconsistent run"]}
+            run.artifacts.append({"type": "run_report", "provider": "steel", "path": report_path})
+            run.verification = {"confidence": "medium", "selected_provider": "steel", "checks": ["simulated inconsistent run"]}
             RunStore().save(run)
 
             with patch("super_browser.runtime.execute_plan") as execute_mock:
@@ -1317,7 +1314,7 @@ class ExecutionTests(unittest.TestCase):
 
     def test_execute_plan_blocks_url_required_primary_without_url_before_adapter_dispatch(self):
         plan = build_plan(infer_task("Search the web for public mentions of this brand"))
-        plan.primary_provider = "browserless"
+        plan.primary_provider = "steel"
         plan.fallback_providers = []
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1329,7 +1326,7 @@ class ExecutionTests(unittest.TestCase):
         self.assertFalse(adapter_mock.called)
         self.assertIn("Provider execution violates task constraints", payload["error"])
         self.assertEqual(payload["verification"]["failures"][0]["type"], "provider_missing_url_constraint_violation")
-        self.assertEqual(payload["verification"]["failures"][0]["provider"], "browserless")
+        self.assertEqual(payload["verification"]["failures"][0]["provider"], "steel")
 
     def test_execute_plan_blocks_raw_http_without_http_url_before_adapter_dispatch(self):
         plan = build_plan(infer_task("Search the web for public mentions of this brand"))
@@ -1610,321 +1607,6 @@ class ExecutionTests(unittest.TestCase):
             else:
                 os.environ["BROWSER_USE_API_KEY"] = old_key
 
-    def test_rtrvr_http_adapter_with_fake_response(self):
-        old_key = os.environ.get("RTRVR_API_KEY")
-        os.environ["RTRVR_API_KEY"] = "test-rtrvr-key"
-
-        class FakeResponse:
-            def read(self):
-                return b'{"result": "ok", "metadata": {"selectedMode": "cloud"}}'
-
-        try:
-            with patch("super_browser.adapters.shutil.which", return_value=None):
-                with patch("super_browser.adapters.urlopen", return_value=FakeResponse()):
-                    plan = build_plan(infer_task("Use my logged in Chrome session to read private dashboard notifications"))
-                    with tempfile.TemporaryDirectory() as tmp:
-                        result = execute_plan(plan, "run_rtrvr", state_dir=Path(tmp), approval_context=_approval_context_for(plan))
-            payload = result.to_dict()
-            self.assertEqual(payload["status"], "complete")
-            self.assertEqual(payload["provider"], "rtrvr")
-            self.assertEqual(payload["artifacts"][0]["transport"], "http")
-            self.assertIn("rtrvr HTTP endpoint returned", payload["verification"]["checks"])
-        finally:
-            if old_key is None:
-                os.environ.pop("RTRVR_API_KEY", None)
-            else:
-                os.environ["RTRVR_API_KEY"] = old_key
-
-    def test_rtrvr_http_failed_payload_is_failed(self):
-        old_key = os.environ.get("RTRVR_API_KEY")
-        os.environ["RTRVR_API_KEY"] = "test-rtrvr-key"
-
-        class FakeResponse:
-            def read(self):
-                return b'{"status": "failed", "error": "rtrvr agent failed"}'
-
-        try:
-            with patch("super_browser.adapters.shutil.which", return_value=None):
-                with patch("super_browser.adapters.urlopen", return_value=FakeResponse()):
-                    plan = build_plan(infer_task("Use my logged in Chrome session to read private dashboard notifications"))
-                    with tempfile.TemporaryDirectory() as tmp:
-                        result = execute_plan(
-                            plan,
-                            "run_rtrvr_failed_payload",
-                            state_dir=Path(tmp),
-                            use_fallbacks=False,
-                            approval_context=_approval_context_for(plan),
-                        )
-            payload = result.to_dict()
-            self.assertEqual(payload["status"], "failed")
-            self.assertEqual(payload["provider"], "rtrvr")
-            self.assertIn("rtrvr agent failed", payload["error"])
-            self.assertIn("provider output checked for explicit failure", payload["verification"]["checks"])
-        finally:
-            if old_key is None:
-                os.environ.pop("RTRVR_API_KEY", None)
-            else:
-                os.environ["RTRVR_API_KEY"] = old_key
-
-    def test_rtrvr_cli_zero_exit_failed_payload_is_failed(self):
-        old_key = os.environ.get("RTRVR_API_KEY")
-        os.environ["RTRVR_API_KEY"] = "test-rtrvr-key"
-        captured = {}
-
-        def fake_run(cmd, capture_output, text, timeout, check):
-            captured["cmd"] = cmd
-            captured["timeout"] = timeout
-            return types.SimpleNamespace(returncode=0, stdout='{"status": "failed", "error": "extension not connected"}', stderr="")
-
-        try:
-            with patch("super_browser.adapters.shutil.which", return_value="/usr/local/bin/rtrvr"):
-                with patch("super_browser.adapters.subprocess.run", side_effect=fake_run):
-                    plan = build_plan(infer_task("Use my logged in Chrome session to read private dashboard notifications"))
-                    with tempfile.TemporaryDirectory() as tmp:
-                        result = execute_plan(
-                            plan,
-                            "run_rtrvr_cli_failed_payload",
-                            state_dir=Path(tmp),
-                            use_fallbacks=False,
-                            approval_context=_approval_context_for(plan),
-                        )
-            payload = result.to_dict()
-            self.assertEqual(payload["status"], "failed")
-            self.assertEqual(payload["provider"], "rtrvr")
-            self.assertIn("extension not connected", payload["error"])
-            self.assertIn("provider output checked for explicit failure", payload["verification"]["checks"])
-            self.assertEqual(captured["timeout"], 600)
-            self.assertIn("--json", captured["cmd"])
-        finally:
-            if old_key is None:
-                os.environ.pop("RTRVR_API_KEY", None)
-            else:
-                os.environ["RTRVR_API_KEY"] = old_key
-
-    def test_rtrvr_http_prompt_includes_draft_only_safety_instruction(self):
-        old_key = os.environ.get("RTRVR_API_KEY")
-        os.environ["RTRVR_API_KEY"] = "test-rtrvr-key"
-        captured = {}
-
-        class FakeResponse:
-            def read(self):
-                return b'{"result": "ok"}'
-
-        def fake_urlopen(request, timeout):
-            captured["body"] = json.loads(request.data.decode("utf-8"))
-            captured["timeout"] = timeout
-            return FakeResponse()
-
-        try:
-            with patch("super_browser.adapters.shutil.which", return_value=None):
-                with patch("super_browser.adapters.urlopen", side_effect=fake_urlopen):
-                    plan = build_plan(infer_task("Draft a reply in the message box but do not send", providers_allowed=["rtrvr"]))
-                    plan.task.draft_only = False
-                    with tempfile.TemporaryDirectory() as tmp:
-                        result = execute_plan(plan, "run_rtrvr_draft_prompt", state_dir=Path(tmp), use_fallbacks=False)
-            payload = result.to_dict()
-            self.assertEqual(payload["status"], "complete")
-            self.assertEqual(payload["provider"], "rtrvr")
-            self.assertIn("SAFETY: This is a draft-only run", captured["body"]["input"])
-            self.assertIn("Do not publish, post, comment, reply, respond, message, DM, send, submit, upload", captured["body"]["input"])
-            self.assertEqual(captured["body"]["target"], "auto")
-            self.assertEqual(captured["timeout"], 600)
-        finally:
-            if old_key is None:
-                os.environ.pop("RTRVR_API_KEY", None)
-            else:
-                os.environ["RTRVR_API_KEY"] = old_key
-
-    def test_browserbase_adapter_with_fake_sdk(self):
-        old_key = os.environ.get("BROWSERBASE_API_KEY")
-        old_project = os.environ.get("BROWSERBASE_PROJECT_ID")
-        old_context = os.environ.get("BROWSERBASE_CONTEXT_ID")
-        os.environ["BROWSERBASE_API_KEY"] = "bb-test-key"
-        os.environ["BROWSERBASE_PROJECT_ID"] = "project-test"
-        os.environ.pop("BROWSERBASE_CONTEXT_ID", None)
-
-        browserbase_module = types.ModuleType("browserbase")
-        created_kwargs = {}
-
-        class FakeSession:
-            id = "session_123"
-            connect_url = "wss://browserbase.test/session"
-
-        class FakeSessions:
-            def create(self, **kwargs):
-                created_kwargs.update(kwargs)
-                return FakeSession()
-
-        class FakeBrowserbase:
-            def __init__(self, api_key):
-                self.api_key = api_key
-                self.sessions = FakeSessions()
-
-        class FakePage:
-            def goto(self, *args, **kwargs):
-                return None
-
-            def title(self):
-                return "Browserbase Fixture"
-
-            def locator(self, selector):
-                class Locator:
-                    def inner_text(self, timeout):
-                        return "fixture text"
-
-                return Locator()
-
-            def screenshot(self, path, full_page):
-                Path(path).write_bytes(b"fakepng")
-
-        class FakeContext:
-            pages = [FakePage()]
-
-        class FakeBrowser:
-            contexts = [FakeContext()]
-
-            def close(self):
-                raise RuntimeError("browserbase close failed after capture")
-
-        class FakeChromium:
-            def connect_over_cdp(self, url):
-                return FakeBrowser()
-
-        class FakePlaywright:
-            chromium = FakeChromium()
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-        playwright_module = types.ModuleType("playwright")
-        sync_api_module = types.ModuleType("playwright.sync_api")
-        sync_api_module.Error = Exception
-        sync_api_module.sync_playwright = lambda: FakePlaywright()
-        browserbase_module.Browserbase = FakeBrowserbase
-        try:
-            with patch.dict(sys.modules, {"browserbase": browserbase_module, "playwright": playwright_module, "playwright.sync_api": sync_api_module}):
-                plan = build_plan(infer_task("Extract a normal cloud page", url="https://example.com"))
-                plan.primary_provider = "browserbase-stagehand"
-                with tempfile.TemporaryDirectory() as tmp:
-                    result = execute_plan(plan, "run_browserbase", state_dir=Path(tmp))
-            payload = result.to_dict()
-            self.assertEqual(payload["status"], "complete")
-            self.assertEqual(payload["provider"], "browserbase-stagehand")
-            self.assertEqual(payload["artifacts"][2]["session_id"], "session_123")
-            self.assertIn("connected over CDP", payload["verification"]["checks"])
-            self.assertEqual(created_kwargs["timeout"], 600)
-            self.assertIn("browserbase_session_timeout_seconds=600", payload["verification"]["checks"])
-            self.assertIn("browser close failed after capture", payload["verification"]["checks"])
-            self.assertIn("browser_close_failed", [event.get("reason") for event in payload["events"]])
-        finally:
-            if old_key is None:
-                os.environ.pop("BROWSERBASE_API_KEY", None)
-            else:
-                os.environ["BROWSERBASE_API_KEY"] = old_key
-            if old_project is None:
-                os.environ.pop("BROWSERBASE_PROJECT_ID", None)
-            else:
-                os.environ["BROWSERBASE_PROJECT_ID"] = old_project
-            if old_context is None:
-                os.environ.pop("BROWSERBASE_CONTEXT_ID", None)
-            else:
-                os.environ["BROWSERBASE_CONTEXT_ID"] = old_context
-
-    def test_browserbase_adapter_bounds_provider_session_timeout(self):
-        old_key = os.environ.get("BROWSERBASE_API_KEY")
-        old_project = os.environ.get("BROWSERBASE_PROJECT_ID")
-        old_context = os.environ.get("BROWSERBASE_CONTEXT_ID")
-        os.environ["BROWSERBASE_API_KEY"] = "bb-test-key"
-        os.environ["BROWSERBASE_PROJECT_ID"] = "project-test"
-        os.environ.pop("BROWSERBASE_CONTEXT_ID", None)
-
-        browserbase_module = types.ModuleType("browserbase")
-        created_timeouts = []
-
-        class FakeSession:
-            id = "session_123"
-            connect_url = "wss://browserbase.test/session"
-
-        class FakeSessions:
-            def create(self, **kwargs):
-                created_timeouts.append(kwargs["timeout"])
-                return FakeSession()
-
-        class FakeBrowserbase:
-            def __init__(self, api_key):
-                self.api_key = api_key
-                self.sessions = FakeSessions()
-
-        class FakePage:
-            def goto(self, *args, **kwargs):
-                return None
-
-            def title(self):
-                return "Browserbase Fixture"
-
-            def locator(self, selector):
-                class Locator:
-                    def inner_text(self, timeout):
-                        return "fixture text"
-
-                return Locator()
-
-            def screenshot(self, path, full_page):
-                Path(path).write_bytes(b"fakepng")
-
-        class FakeContext:
-            pages = [FakePage()]
-
-        class FakeBrowser:
-            contexts = [FakeContext()]
-
-            def close(self):
-                return None
-
-        class FakeChromium:
-            def connect_over_cdp(self, url):
-                return FakeBrowser()
-
-        class FakePlaywright:
-            chromium = FakeChromium()
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-        playwright_module = types.ModuleType("playwright")
-        sync_api_module = types.ModuleType("playwright.sync_api")
-        sync_api_module.Error = Exception
-        sync_api_module.sync_playwright = lambda: FakePlaywright()
-        browserbase_module.Browserbase = FakeBrowserbase
-        try:
-            with patch.dict(sys.modules, {"browserbase": browserbase_module, "playwright": playwright_module, "playwright.sync_api": sync_api_module}):
-                for run_id, timeout_seconds in (("run_browserbase_min_timeout", 12), ("run_browserbase_max_timeout", 30_000)):
-                    plan = build_plan(infer_task("Extract a normal cloud page", url="https://example.com", timeout_seconds=timeout_seconds))
-                    plan.primary_provider = "browserbase-stagehand"
-                    with tempfile.TemporaryDirectory() as tmp:
-                        result = execute_plan(plan, run_id, state_dir=Path(tmp), use_fallbacks=False)
-                    self.assertEqual(result.status, "complete")
-            self.assertEqual(created_timeouts, [60, 21_600])
-        finally:
-            if old_key is None:
-                os.environ.pop("BROWSERBASE_API_KEY", None)
-            else:
-                os.environ["BROWSERBASE_API_KEY"] = old_key
-            if old_project is None:
-                os.environ.pop("BROWSERBASE_PROJECT_ID", None)
-            else:
-                os.environ["BROWSERBASE_PROJECT_ID"] = old_project
-            if old_context is None:
-                os.environ.pop("BROWSERBASE_CONTEXT_ID", None)
-            else:
-                os.environ["BROWSERBASE_CONTEXT_ID"] = old_context
-
     def test_orgo_adapter_with_fake_http(self):
         old_key = os.environ.get("ORGO_API_KEY")
         old_id = os.environ.get("ORGO_COMPUTER_ID")
@@ -1974,6 +1656,90 @@ class ExecutionTests(unittest.TestCase):
                 os.environ.pop("ORGO_MODEL", None)
             else:
                 os.environ["ORGO_MODEL"] = old_model
+
+    def test_orgo_adapter_auto_discovers_computer_when_id_unset(self):
+        old_key = os.environ.get("ORGO_API_KEY")
+        old_id = os.environ.get("ORGO_COMPUTER_ID")
+        os.environ["ORGO_API_KEY"] = "orgo-test-key"
+        os.environ.pop("ORGO_COMPUTER_ID", None)
+        calls = []
+
+        def fake_http_json(url, body, headers, method="POST", timeout_seconds=None):
+            calls.append((url, body, method))
+            self.assertEqual(headers["Authorization"], "Bearer orgo-test-key")
+            if url.endswith("/workspaces") and method == "GET":
+                return []
+            if url.endswith("/workspaces") and method == "POST":
+                self.assertEqual(body["name"], "super-browser")
+                return {"id": "ws_auto", "name": "super-browser"}
+            if url.endswith("/workspaces/ws_auto") and method == "GET":
+                return {"id": "ws_auto", "desktops": []}
+            if url.endswith("/computers") and method == "POST":
+                self.assertEqual(body["workspace_id"], "ws_auto")
+                self.assertEqual(body["name"], "super-browser-agent")
+                self.assertEqual(body["auto_stop_minutes"], 30)
+                return {"id": "computer_auto", "status": "running"}
+            if url.endswith("/v1/chat/completions"):
+                self.assertEqual(body["computer_id"], "computer_auto")
+                return {"id": "chatcmpl_auto", "choices": [{"message": {"content": "done"}}]}
+            if url.endswith("/screenshot"):
+                return {"image": "base64-image"}
+            raise AssertionError(url)
+
+        try:
+            with patch("super_browser.adapters._http_json", side_effect=fake_http_json):
+                plan = build_plan(infer_task("Use a desktop computer to inspect files"))
+                plan.primary_provider = "orgo"
+                with tempfile.TemporaryDirectory() as tmp:
+                    result = execute_plan(plan, "run_orgo_auto_discover", state_dir=Path(tmp), use_fallbacks=False)
+            payload = result.to_dict()
+            self.assertEqual(payload["status"], "complete")
+            self.assertEqual(payload["provider"], "orgo")
+            self.assertEqual(payload["artifacts"][0]["computer_id"], "computer_auto")
+            self.assertTrue(any(check.startswith("computer: created computer") for check in payload["verification"]["checks"]))
+        finally:
+            if old_key is None:
+                os.environ.pop("ORGO_API_KEY", None)
+            else:
+                os.environ["ORGO_API_KEY"] = old_key
+            if old_id is not None:
+                os.environ["ORGO_COMPUTER_ID"] = old_id
+
+    def test_orgo_adapter_reuses_running_computer_when_id_unset(self):
+        old_key = os.environ.get("ORGO_API_KEY")
+        old_id = os.environ.get("ORGO_COMPUTER_ID")
+        os.environ["ORGO_API_KEY"] = "orgo-test-key"
+        os.environ.pop("ORGO_COMPUTER_ID", None)
+
+        def fake_http_json(url, body, headers, method="POST", timeout_seconds=None):
+            if url.endswith("/workspaces") and method == "GET":
+                return {"projects": [{"id": "ws_1", "name": "super-browser"}]}
+            if url.endswith("/workspaces/ws_1") and method == "GET":
+                return {"id": "ws_1", "desktops": [{"id": "computer_run", "name": "super-browser-agent", "status": "running"}]}
+            if url.endswith("/v1/chat/completions"):
+                self.assertEqual(body["computer_id"], "computer_run")
+                return {"id": "chatcmpl_reuse", "choices": [{"message": {"content": "done"}}]}
+            if url.endswith("/screenshot"):
+                return {"image": "base64-image"}
+            raise AssertionError(url)
+
+        try:
+            with patch("super_browser.adapters._http_json", side_effect=fake_http_json):
+                plan = build_plan(infer_task("Use a desktop computer to inspect files"))
+                plan.primary_provider = "orgo"
+                with tempfile.TemporaryDirectory() as tmp:
+                    result = execute_plan(plan, "run_orgo_reuse", state_dir=Path(tmp), use_fallbacks=False)
+            payload = result.to_dict()
+            self.assertEqual(payload["status"], "complete")
+            self.assertEqual(payload["artifacts"][0]["computer_id"], "computer_run")
+            self.assertTrue(any("reused running computer" in check for check in payload["verification"]["checks"]))
+        finally:
+            if old_key is None:
+                os.environ.pop("ORGO_API_KEY", None)
+            else:
+                os.environ["ORGO_API_KEY"] = old_key
+            if old_id is not None:
+                os.environ["ORGO_COMPUTER_ID"] = old_id
 
     def test_orgo_adapter_chat_exception_is_failed_result(self):
         old_key = os.environ.get("ORGO_API_KEY")
@@ -2055,8 +1821,10 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(headers["Authorization"], "Bearer airtop-test-key")
             if method == "DELETE":
                 return {}
+            if method == "GET" and url.endswith("/sessions/session_123"):
+                return {"data": {"id": "session_123", "status": "running"}}
             if url.endswith("/sessions"):
-                return {"data": {"id": "session_123"}}
+                return {"data": {"id": "session_123", "status": "initializing"}}
             if url.endswith("/sessions/session_123/windows"):
                 self.assertEqual(body["url"], "https://example.com")
                 return {"data": {"windowId": "window_123", "targetId": "target_123"}}
@@ -2098,8 +1866,10 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(headers["Authorization"], "Bearer airtop-test-key")
             if method == "DELETE":
                 return {}
+            if method == "GET" and url.endswith("/sessions/session_123"):
+                return {"data": {"id": "session_123", "status": "running"}}
             if url.endswith("/sessions"):
-                return {"data": {"id": "session_123"}}
+                return {"data": {"id": "session_123", "status": "initializing"}}
             if url.endswith("/sessions/session_123/windows"):
                 return {"data": {"windowId": "window_123"}}
             if url.endswith("/sessions/session_123/windows/window_123/page-query"):
@@ -2315,17 +2085,36 @@ class ExecutionTests(unittest.TestCase):
         sync_api_module = types.ModuleType("playwright.sync_api")
         sync_api_module.Error = Exception
         sync_api_module.sync_playwright = lambda: FakePlaywright()
+
+        http_calls = []
+
+        def fake_http_json(url, body, headers, method="POST", timeout_seconds=None):
+            http_calls.append({"url": url, "body": body, "headers": headers, "method": method})
+            if url.endswith("/sessions"):
+                return {"id": "11111111-2222-3333-4444-555555555555"}
+            if url.endswith("/release"):
+                return {}
+            raise AssertionError(f"unexpected steel http call: {url}")
+
         try:
             with patch.dict(sys.modules, {"playwright": playwright_module, "playwright.sync_api": sync_api_module}):
-                plan = build_plan(infer_task("Extract a cloud browser page", url="https://example.com"))
-                plan.primary_provider = "steel"
-                with tempfile.TemporaryDirectory() as tmp:
-                    result = execute_plan(plan, "run_steel", state_dir=Path(tmp))
+                with patch("super_browser.adapters._http_json", side_effect=fake_http_json):
+                    plan = build_plan(infer_task("Extract a cloud browser page", url="https://example.com"))
+                    plan.primary_provider = "steel"
+                    with tempfile.TemporaryDirectory() as tmp:
+                        result = execute_plan(plan, "run_steel", state_dir=Path(tmp))
             payload = result.to_dict()
             self.assertEqual(payload["status"], "complete")
             self.assertEqual(payload["provider"], "steel")
             self.assertEqual(seen["goto"], "https://example.com")
             self.assertIn("apiKey=steel-test-key", seen["cdp_url"])
+            self.assertIn("sessionId=11111111-2222-3333-4444-555555555555", seen["cdp_url"])
+            self.assertEqual(http_calls[0]["url"], "https://api.steel.dev/v1/sessions")
+            self.assertEqual(http_calls[0]["headers"]["steel-api-key"], "steel-test-key")
+            self.assertEqual(
+                http_calls[-1]["url"],
+                "https://api.steel.dev/v1/sessions/11111111-2222-3333-4444-555555555555/release",
+            )
             self.assertIn("connected to Steel over CDP", payload["verification"]["checks"])
             self.assertTrue(seen["close_attempted"])
             self.assertIn("browser close failed after capture", payload["verification"]["checks"])
@@ -2336,175 +2125,107 @@ class ExecutionTests(unittest.TestCase):
             else:
                 os.environ["STEEL_API_KEY"] = old_key
 
-    def test_browserless_adapter_with_fake_http(self):
-        old_token = os.environ.get("BROWSERLESS_TOKEN")
-        os.environ["BROWSERLESS_TOKEN"] = "browserless-test-token"
-
-        def fake_http_json(url, body, headers, method="POST", timeout_seconds=None):
-            self.assertIn("token=browserless-test-token", url)
-            self.assertEqual(body["url"], "https://example.com")
-            self.assertEqual(body["elements"][0]["selector"], "body")
-            return {"data": [{"results": [{"text": "Browserless fixture"}]}]}
-
-        try:
-            with patch("super_browser.adapters._http_json", side_effect=fake_http_json):
-                plan = build_plan(infer_task("Scrape the hosted browser page", url="https://example.com"))
-                plan.primary_provider = "browserless"
-                with tempfile.TemporaryDirectory() as tmp:
-                    result = execute_plan(plan, "run_browserless", state_dir=Path(tmp))
-            payload = result.to_dict()
-            self.assertEqual(payload["status"], "complete")
-            self.assertEqual(payload["provider"], "browserless")
-            self.assertIn("called Browserless scrape API", payload["verification"]["checks"])
-        finally:
-            if old_token is None:
-                os.environ.pop("BROWSERLESS_TOKEN", None)
-            else:
-                os.environ["BROWSERLESS_TOKEN"] = old_token
-
-    def test_browserless_adapter_failed_payload_is_failed(self):
-        old_token = os.environ.get("BROWSERLESS_TOKEN")
-        os.environ["BROWSERLESS_TOKEN"] = "browserless-test-token"
-
-        def fake_http_json(url, body, headers, method="POST", timeout_seconds=None):
-            self.assertIn("token=browserless-test-token", url)
-            self.assertEqual(body["url"], "https://example.com")
-            return {"success": False, "message": "scrape was blocked"}
-
-        try:
-            with patch("super_browser.adapters._http_json", side_effect=fake_http_json):
-                plan = build_plan(infer_task("Scrape the hosted browser page", url="https://example.com"))
-                plan.primary_provider = "browserless"
-                with tempfile.TemporaryDirectory() as tmp:
-                    result = execute_plan(plan, "run_browserless_failed_payload", state_dir=Path(tmp), use_fallbacks=False)
-            payload = result.to_dict()
-            self.assertEqual(payload["status"], "failed")
-            self.assertEqual(payload["provider"], "browserless")
-            self.assertIn("success=false", payload["error"])
-            self.assertIn("provider payload checked for explicit failure", payload["verification"]["checks"])
-        finally:
-            if old_token is None:
-                os.environ.pop("BROWSERLESS_TOKEN", None)
-            else:
-                os.environ["BROWSERLESS_TOKEN"] = old_token
-
-    def test_browserless_adapter_nested_failed_payload_is_failed(self):
-        old_token = os.environ.get("BROWSERLESS_TOKEN")
-        os.environ["BROWSERLESS_TOKEN"] = "browserless-test-token"
-
-        def fake_http_json(url, body, headers, method="POST", timeout_seconds=None):
-            self.assertIn("token=browserless-test-token", url)
-            self.assertEqual(body["url"], "https://example.com")
-            return {"data": [{"status": "failed", "error": "blocked inside result item"}]}
-
-        try:
-            with patch("super_browser.adapters._http_json", side_effect=fake_http_json):
-                plan = build_plan(infer_task("Scrape the hosted browser page", url="https://example.com"))
-                plan.primary_provider = "browserless"
-                with tempfile.TemporaryDirectory() as tmp:
-                    result = execute_plan(plan, "run_browserless_nested_failed_payload", state_dir=Path(tmp), use_fallbacks=False)
-            payload = result.to_dict()
-            self.assertEqual(payload["status"], "failed")
-            self.assertEqual(payload["provider"], "browserless")
-            self.assertIn("blocked inside result item", payload["error"])
-            self.assertIn("data[0].error", payload["error"])
-        finally:
-            if old_token is None:
-                os.environ.pop("BROWSERLESS_TOKEN", None)
-            else:
-                os.environ["BROWSERLESS_TOKEN"] = old_token
-
     def test_provider_transport_blocks_private_base_url_override_before_credentials_are_sent(self):
-        old_token = os.environ.get("BROWSERLESS_TOKEN")
-        old_base = os.environ.get("BROWSERLESS_BASE_URL")
+        old_key = os.environ.get("HYPERBROWSER_API_KEY")
+        old_base = os.environ.get("HYPERBROWSER_API_BASE")
         old_allow_internal = os.environ.get("SUPER_BROWSER_ALLOW_INTERNAL_PROVIDER_BASES")
-        os.environ["BROWSERLESS_TOKEN"] = "browserless-test-token"
-        os.environ["BROWSERLESS_BASE_URL"] = "https://10.0.0.5"
+        os.environ["HYPERBROWSER_API_KEY"] = "hyperbrowser-test-key"
+        os.environ["HYPERBROWSER_API_BASE"] = "https://10.0.0.5"
         os.environ.pop("SUPER_BROWSER_ALLOW_INTERNAL_PROVIDER_BASES", None)
         try:
-            plan = build_plan(infer_task("Scrape the hosted browser page", url="https://93.184.216.34", providers_allowed=["browserless"]))
+            plan = build_plan(infer_task("Scrape the hosted browser page", url="https://93.184.216.34", providers_allowed=["hyperbrowser"]))
             with tempfile.TemporaryDirectory() as tmp:
                 with patch("super_browser.adapters._http_json") as http_mock:
-                    result = execute_plan(plan, "run_browserless_private_base_guard", state_dir=Path(tmp), use_fallbacks=False)
+                    result = execute_plan(plan, "run_hyperbrowser_private_base_guard", state_dir=Path(tmp), use_fallbacks=False)
                 payload = result.to_dict()
                 self.assertEqual(payload["status"], "blocked")
                 self.assertFalse(http_mock.called)
-                self.assertEqual(payload["provider"], "browserless")
+                self.assertEqual(payload["provider"], "hyperbrowser")
                 self.assertIn("provider_transport_target_scope", [event["reason"] for event in payload["events"] if event["type"] == "blocked"])
                 self.assertIn("provider transport override was inspected before credentials were sent", payload["verification"]["checks"])
                 metadata_artifact = next(item for item in payload["artifacts"] if item["type"] == "metadata")
                 with open(metadata_artifact["path"], encoding="utf-8") as handle:
                     metadata = json.load(handle)
-                self.assertEqual(metadata["env_name"], "BROWSERLESS_BASE_URL")
+                self.assertEqual(metadata["env_name"], "HYPERBROWSER_API_BASE")
                 self.assertEqual(metadata["reason"], "provider_transport_target_scope")
                 self.assertEqual(metadata["evidence"]["target_evidence"]["target_scope"], "private_network")
         finally:
-            if old_token is None:
-                os.environ.pop("BROWSERLESS_TOKEN", None)
+            if old_key is None:
+                os.environ.pop("HYPERBROWSER_API_KEY", None)
             else:
-                os.environ["BROWSERLESS_TOKEN"] = old_token
+                os.environ["HYPERBROWSER_API_KEY"] = old_key
             if old_base is None:
-                os.environ.pop("BROWSERLESS_BASE_URL", None)
+                os.environ.pop("HYPERBROWSER_API_BASE", None)
             else:
-                os.environ["BROWSERLESS_BASE_URL"] = old_base
+                os.environ["HYPERBROWSER_API_BASE"] = old_base
             if old_allow_internal is None:
                 os.environ.pop("SUPER_BROWSER_ALLOW_INTERNAL_PROVIDER_BASES", None)
             else:
                 os.environ["SUPER_BROWSER_ALLOW_INTERNAL_PROVIDER_BASES"] = old_allow_internal
 
     def test_provider_transport_allows_loopback_base_url_override(self):
-        old_token = os.environ.get("BROWSERLESS_TOKEN")
-        old_base = os.environ.get("BROWSERLESS_BASE_URL")
-        os.environ["BROWSERLESS_TOKEN"] = "browserless-test-token"
-        os.environ["BROWSERLESS_BASE_URL"] = "http://127.0.0.1:3000"
+        old_key = os.environ.get("HYPERBROWSER_API_KEY")
+        old_base = os.environ.get("HYPERBROWSER_API_BASE")
+        old_poll = os.environ.get("HYPERBROWSER_POLL_SECONDS")
+        os.environ["HYPERBROWSER_API_KEY"] = "hyperbrowser-test-key"
+        os.environ["HYPERBROWSER_API_BASE"] = "http://127.0.0.1:3000"
+        os.environ["HYPERBROWSER_POLL_SECONDS"] = "0"
         captured = {}
 
         def fake_http_json(url, body, headers, method="POST", timeout_seconds=None):
-            captured["url"] = url
-            return {"data": [{"results": [{"text": "Browserless fixture"}]}]}
+            captured.setdefault("first_url", url)
+            if url.endswith("/scrape") and method == "POST":
+                return {"jobId": "job_loopback"}
+            if url.endswith("/scrape/job_loopback/status"):
+                return {"status": "completed"}
+            return {"jobId": "job_loopback", "status": "completed", "data": {"markdown": "Hyperbrowser fixture"}}
 
         try:
-            plan = build_plan(infer_task("Scrape the hosted browser page", url="https://93.184.216.34", providers_allowed=["browserless"]))
+            plan = build_plan(infer_task("Scrape the hosted browser page", url="https://93.184.216.34", providers_allowed=["hyperbrowser"]))
             with tempfile.TemporaryDirectory() as tmp:
                 with patch("super_browser.adapters._http_json", side_effect=fake_http_json):
-                    result = execute_plan(plan, "run_browserless_loopback_base", state_dir=Path(tmp), use_fallbacks=False)
+                    result = execute_plan(plan, "run_hyperbrowser_loopback_base", state_dir=Path(tmp), use_fallbacks=False)
             payload = result.to_dict()
             self.assertEqual(payload["status"], "complete")
-            self.assertTrue(captured["url"].startswith("http://127.0.0.1:3000/scrape?"))
+            self.assertTrue(captured["first_url"].startswith("http://127.0.0.1:3000/scrape"))
         finally:
-            if old_token is None:
-                os.environ.pop("BROWSERLESS_TOKEN", None)
+            if old_key is None:
+                os.environ.pop("HYPERBROWSER_API_KEY", None)
             else:
-                os.environ["BROWSERLESS_TOKEN"] = old_token
+                os.environ["HYPERBROWSER_API_KEY"] = old_key
             if old_base is None:
-                os.environ.pop("BROWSERLESS_BASE_URL", None)
+                os.environ.pop("HYPERBROWSER_API_BASE", None)
             else:
-                os.environ["BROWSERLESS_BASE_URL"] = old_base
+                os.environ["HYPERBROWSER_API_BASE"] = old_base
+            if old_poll is None:
+                os.environ.pop("HYPERBROWSER_POLL_SECONDS", None)
+            else:
+                os.environ["HYPERBROWSER_POLL_SECONDS"] = old_poll
 
     def test_provider_transport_blocks_base_url_credentials_before_credentials_are_sent(self):
-        old_token = os.environ.get("BROWSERLESS_TOKEN")
-        old_base = os.environ.get("BROWSERLESS_BASE_URL")
-        os.environ["BROWSERLESS_TOKEN"] = "browserless-test-token"
-        os.environ["BROWSERLESS_BASE_URL"] = "https://user:pass@browserless.example"
+        old_key = os.environ.get("HYPERBROWSER_API_KEY")
+        old_base = os.environ.get("HYPERBROWSER_API_BASE")
+        os.environ["HYPERBROWSER_API_KEY"] = "hyperbrowser-test-key"
+        os.environ["HYPERBROWSER_API_BASE"] = "https://user:pass@hyperbrowser.example"
         try:
-            plan = build_plan(infer_task("Scrape the hosted browser page", url="https://93.184.216.34", providers_allowed=["browserless"]))
+            plan = build_plan(infer_task("Scrape the hosted browser page", url="https://93.184.216.34", providers_allowed=["hyperbrowser"]))
             with tempfile.TemporaryDirectory() as tmp:
                 with patch("super_browser.adapters._http_json") as http_mock:
-                    result = execute_plan(plan, "run_browserless_base_credentials_guard", state_dir=Path(tmp), use_fallbacks=False)
+                    result = execute_plan(plan, "run_hyperbrowser_base_credentials_guard", state_dir=Path(tmp), use_fallbacks=False)
                 payload = result.to_dict()
                 self.assertEqual(payload["status"], "blocked")
                 self.assertFalse(http_mock.called)
                 self.assertIn("invalid_provider_transport_url", [event["reason"] for event in payload["events"] if event["type"] == "blocked"])
                 self.assertIn("provider transport URL must not contain username or password credentials", payload["error"])
         finally:
-            if old_token is None:
-                os.environ.pop("BROWSERLESS_TOKEN", None)
+            if old_key is None:
+                os.environ.pop("HYPERBROWSER_API_KEY", None)
             else:
-                os.environ["BROWSERLESS_TOKEN"] = old_token
+                os.environ["HYPERBROWSER_API_KEY"] = old_key
             if old_base is None:
-                os.environ.pop("BROWSERLESS_BASE_URL", None)
+                os.environ.pop("HYPERBROWSER_API_BASE", None)
             else:
-                os.environ["BROWSERLESS_BASE_URL"] = old_base
+                os.environ["HYPERBROWSER_API_BASE"] = old_base
 
 
 if __name__ == "__main__":

@@ -84,13 +84,15 @@ Use `super-browser resume <run-id>` or `resume_browser_run` to continue a planne
 
 ## Routing Defaults
 
-- Local Playwright for simple deterministic tasks.
-- Browserbase/Stagehand for general cloud browser workflows.
-- Browser Use for anti-bot and hard browser tasks.
-- Rtrvr for logged-in local Chrome sessions.
-- Orgo for full desktop/computer use.
-- Decodo for raw HTTP and cheap residential proxy fetches when the task includes an `http://` or `https://` endpoint.
-- Hyperbrowser, Steel, Browserless, and Airtop are evaluating providers until live tests pass for a task class.
+Routing is capability-first: the router asks "what does the task need?" and filters providers by capability (auth, anti-bot, CAPTCHA, profiles, proxy injection, fleet, desktop, raw HTTP). An escalation rank then orders equally capable providers from cheapest/most deterministic to most expensive — it is a cost tie-breaker, not the routing model. See `references/routing-playbook.md` for the capability table.
+
+- Simple deterministic tasks → local Playwright (free, rank 1).
+- Anti-bot, CAPTCHA, hard browser tasks, and logged-in cloud profiles → Browser Use (rank 1 cloud).
+- Cloud-scale scraping, page-query, session workflows, profiles, proxy injection, fleets → Hyperbrowser and Airtop (rank 2).
+- Hosted Chromium sessions over Playwright CDP, profiles, proxy injection, fleets → Steel (rank 3).
+- Full desktop/computer use → Orgo (rank 4, the only desktop-capable provider).
+- Raw HTTP and cheap residential proxy fetches with a concrete `http://`/`https://` endpoint → Decodo, a separate lane that never enters browser fallbacks.
+- Hyperbrowser, Steel, and Airtop stay evaluating providers until live tests pass for a task class.
 
 ## Council Reports
 
@@ -102,11 +104,11 @@ Use `super-browser doctor` or `browser_doctor` before live/provider execution. T
 
 Use `super-browser production-readiness` or MCP `production_readiness` as the final go-live gate. It returns `production_ready=false` and CLI exit `1` when required providers are missing env vars, have stale or missing live evidence, or still have uncertified workflow classes. Do not claim production readiness when this gate is blocked.
 
-Use `super-browser env-checklist` or MCP `env_checklist` before setup handoff or paid/provider execution. It reports required and optional env var names, configured/missing status, provider mapping, global runtime knobs such as `SUPER_BROWSER_APPROVAL_TTL_SECONDS`, and live-test commands without exposing secret values.
+Use `super-browser setup` or MCP `setup_walkthrough` on first install — step-by-step clone, pip, skills, MCP, doctor, and API signup links. Use `super-browser env-checklist` or MCP `env_checklist` before setup handoff or paid/provider execution. It reports required and optional env var names, configured/missing status, provider mapping, global runtime knobs such as `SUPER_BROWSER_APPROVAL_TTL_SECONDS`, and live-test commands without exposing secret values.
 
 Use `super-browser bundle-manifest` or MCP `bundle_manifest` before handing Super Browser to another agent, auditing an installed bundle, or preparing a release. The manifest is the authoritative hashed inventory of bundle files, entrypoints, specialist skills, providers, MCP tools, and docs resources. Installed bundles include `super-browser-manifest.json`.
 
-Optional provider transport overrides such as `RTRVR_API_BASE`, `ORGO_API_BASE`, `AIRTOP_API_BASE`, `HYPERBROWSER_API_BASE`, `BROWSERLESS_BASE_URL`, and `STEEL_CDP_URL` are inspected before credentials are sent. Loopback self-hosted providers may use HTTP/WS. Private-network or link-local provider endpoints require `SUPER_BROWSER_ALLOW_INTERNAL_PROVIDER_BASES=1`, and insecure non-loopback HTTP/WS requires `SUPER_BROWSER_ALLOW_INSECURE_PROVIDER_BASES=1`.
+Optional provider transport overrides such as `ORGO_API_BASE`, `AIRTOP_API_BASE`, `HYPERBROWSER_API_BASE`, and `STEEL_CDP_URL` are inspected before credentials are sent. Loopback self-hosted providers may use HTTP/WS. Private-network or link-local provider endpoints require `SUPER_BROWSER_ALLOW_INTERNAL_PROVIDER_BASES=1`, and insecure non-loopback HTTP/WS requires `SUPER_BROWSER_ALLOW_INSECURE_PROVIDER_BASES=1`.
 
 Request a specific class with `super-browser live-test --provider <provider> --workflow-class <class>` or MCP `run_browser_live_tests` with `workflow_class`. Supported classes accumulate per provider, so a later `external_write_gate` proof does not erase an earlier `raw_http_direct`, `general_read`, `authenticated_read`, or `desktop_read` proof. `skipped` means no provider execution happened and does not erase an existing class proof; `failed` replaces that class record and removes certification. Unsupported provider/class pairs return `unsupported_workflow_class=true` and do not overwrite previous evidence.
 
@@ -134,7 +136,7 @@ Inspect `target_scope` in every plan. `loopback`, `private_network`, `link_local
 
 Raw HTTP redirects are target-scope checked before they are followed. A redirect into `loopback`, `private_network`, `link_local`, or `local_file` is blocked unless the run was originally planned for that same scope.
 
-Playwright-backed browser adapters target-scope check browser requests before navigation can complete. Local Playwright, Browserbase/Stagehand CDP, and Steel CDP block redirects or subresources into sensitive scopes unless the run was planned for that scope. Treat `browser_request_target_scope` as a safety stop and inspect its metadata before replanning.
+Playwright-backed browser adapters target-scope check browser requests before navigation can complete. Local Playwright and Steel CDP block redirects or subresources into sensitive scopes unless the run was planned for that scope. Treat `browser_request_target_scope` as a safety stop and inspect its metadata before replanning.
 
 Raw HTTP, URL-capable remote/desktop providers, and Playwright-backed browser guards also resolve `public_web` hostnames at execution time. If DNS resolution returns loopback, private-network, or link-local addresses, or local DNS resolution fails and the target cannot be verified, stop and replan for the real target scope instead of retrying the public-web run. Treat `provider_url_resolved_target_scope` as a remote/desktop-provider safety stop before the URL was sent to the provider. Target-scope and DNS safety stops are non-resumable; create a new run or replan instead of calling resume on the blocked run.
 

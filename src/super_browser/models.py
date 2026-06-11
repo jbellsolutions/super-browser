@@ -37,6 +37,9 @@ class TaskSpec:
     max_cost_usd: float | None = None
     timeout_seconds: int | None = None
     providers_allowed: list[str] = field(default_factory=list)
+    profile: str | None = None
+    proxy: str | None = None
+    fleet_index: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -57,6 +60,10 @@ class ProviderCapability:
     supports_raw_http: bool = False
     supports_anti_bot: bool = False
     supports_long_running: bool = False
+    supports_captcha: bool = False
+    supports_profiles: bool = False
+    supports_proxy_injection: bool = False
+    supports_fleet: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

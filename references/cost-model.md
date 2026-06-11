@@ -7,7 +7,7 @@ Use this model to keep routing practical. Exact prices change, so treat values a
 | free | Local or already bundled | Playwright |
 | low | Cheap per request/GB when rendering is unnecessary and an HTTP endpoint is supplied | Decodo HTTP |
 | medium | Subscription or per-machine cost that should be justified | Orgo, Airtop |
-| variable | Session/token/proxy/credit costs can move fast | Browser Use, Browserbase/Stagehand, Rtrvr, Hyperbrowser, Steel, Browserless |
+| variable | Session/token/proxy/credit costs can move fast | Browser Use, Hyperbrowser, Steel |
 
 ## Rules
 
@@ -50,8 +50,8 @@ Long-running, anti-bot, desktop, and authenticated workflows can add conservativ
 
 1. Playwright or direct local tooling.
 2. Decodo/raw HTTP when rendering is unnecessary and the task supplies an HTTP endpoint.
-3. Browserbase/Stagehand for general cloud sessions.
-4. Rtrvr for auth only when the local profile is the reason it wins.
-5. Browser Use for hard anti-bot or complex cloud agent work.
+3. Browser Use for hard anti-bot or complex cloud agent work.
+4. Hyperbrowser or Airtop for general cloud sessions at scale.
+5. Steel for hosted Chromium sessions when CDP control is needed.
 6. Orgo only when desktop/computer use is actually required.
-7. Airtop, Hyperbrowser, Steel, and Browserless only after live tests prove they are cheaper or more reliable for that task class.
+7. Hyperbrowser, Airtop, and Steel only count as production-ready after live tests prove the task class.

@@ -417,16 +417,16 @@ class VerifierTests(unittest.TestCase):
     def test_verify_reports_final_provider_outside_planned_sequence(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["SUPER_BROWSER_STATE_DIR"] = tmp
-            plan = {"primary_provider": "playwright", "fallback_providers": ["browserbase-stagehand"], "task": _task_payload()}
+            plan = {"primary_provider": "playwright", "fallback_providers": ["hyperbrowser"], "task": _task_payload()}
             report_path = _artifact_path(tmp, "run_wrong_provider", "run-report.json")
             report_path.write_text(
                 json.dumps(
                     {
                         "run_id": "run_wrong_provider",
                         "plan_sha256": plan_fingerprint(plan),
-                        "final_provider": "browserless",
+                        "final_provider": "steel",
                         "final_status": "complete",
-                        "attempts": [{"order": 1, "provider": "browserless", "status": "complete"}],
+                        "attempts": [{"order": 1, "provider": "steel", "status": "complete"}],
                         "cost_estimate": {"budget_status": "no_ceiling"},
                     }
                 ),
@@ -436,16 +436,16 @@ class VerifierTests(unittest.TestCase):
                 "run_id": "run_wrong_provider",
                 "status": "complete",
                 "plan": plan,
-                "artifacts": [{"type": "run_report", "provider": "browserless", "path": str(report_path)}],
+                "artifacts": [{"type": "run_report", "provider": "steel", "path": str(report_path)}],
                 "approvals": [],
-                "verification": {"confidence": "high", "checks": [], "selected_provider": "browserless"},
+                "verification": {"confidence": "high", "checks": [], "selected_provider": "steel"},
             }
 
             report = verify_run_payload(payload)
 
             self.assertEqual(report["confidence"], "low")
             self.assertEqual(report["failures"][0]["type"], "run_report_final_provider_not_planned")
-            self.assertEqual(report["failures"][0]["planned_providers"], ["playwright", "browserbase-stagehand"])
+            self.assertEqual(report["failures"][0]["planned_providers"], ["playwright", "hyperbrowser"])
 
     def test_verify_reports_approval_integrity_mismatch_after_approved_plan_change(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -530,7 +530,7 @@ class VerifierTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["SUPER_BROWSER_STATE_DIR"] = tmp
             run = create_run("Search the web for public mentions of this brand", execute=False)
-            run.plan["primary_provider"] = "browserless"
+            run.plan["primary_provider"] = "steel"
             run.plan["fallback_providers"] = []
             RunStore().save(run)
 
@@ -539,7 +539,7 @@ class VerifierTests(unittest.TestCase):
             self.assertEqual(report["confidence"], "low")
             self.assertIn("provider sequence constraints failed", report["checks"])
             self.assertEqual(report["failures"][0]["type"], "provider_missing_url_constraint_violation")
-            self.assertEqual(report["failures"][0]["provider"], "browserless")
+            self.assertEqual(report["failures"][0]["provider"], "steel")
 
     def test_verify_reports_raw_http_without_http_url(self):
         with tempfile.TemporaryDirectory() as tmp:

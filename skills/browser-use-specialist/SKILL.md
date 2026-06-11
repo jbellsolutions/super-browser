@@ -1,6 +1,6 @@
 ---
 name: browser-use-specialist
-description: Use Browser Use Cloud for hardened cloud browser automation, anti-bot workflows, browser profiles, recordings, live URLs, and complex natural-language browser tasks. Use when sites are protected or local Playwright/Browserbase are likely to fail.
+description: "Escalation rank 1 (default cloud browser): Use Browser Use Cloud for hardened cloud browser automation," anti-bot workflows, browser profiles, recordings, live URLs, and complex natural-language browser tasks. Use when sites are protected or local Playwright is likely to fail.
 ---
 
 # Browser Use Specialist

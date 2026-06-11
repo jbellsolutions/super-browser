@@ -6,17 +6,21 @@ import sys
 
 from .bundle import build_bundle_manifest, write_bundle_manifest
 from .env_checklist import environment_checklist
+from .fleet import create_fleet_runs
 from .models import RUN_STATUS_VALUES
+from .profiles import ProfileStore
 from .production import production_readiness
 from .providers import PROVIDERS, list_providers, provider_readiness
 from .redaction import redact_text, safe_json_dumps
 from .router import build_plan, infer_task
 from .runtime import approve_run, create_run, deny_run, resume_run
 from .setup_helpers import install_skill_bundle, mcp_config, write_mcp_config
+from .setup_walkthrough import launch_setup
 from .store import RunStore
 from .handoff import build_handoff
 from .live_tests import WORKFLOW_CLASSES, run_live_tests
 from .verifier import verify_run
+from . import agent as slack_agent
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     plan_p.add_argument("--allow-provider", action="append", choices=list(PROVIDERS.keys()), default=[])
     plan_p.add_argument("--max-cost-usd", type=float)
     plan_p.add_argument("--timeout-seconds", type=_positive_int)
+    plan_p.add_argument("--profile", help="Named persistent browser profile from ProfileStore.")
+    plan_p.add_argument("--proxy", help="Proxy hint (decodo/auto/sticky or full proxy URL).")
 
     run_p = sub.add_parser("run", help="Create and execute a durable browser automation run when policy allows.")
     run_p.add_argument("--goal", required=True)
@@ -38,7 +44,22 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--allow-provider", action="append", choices=list(PROVIDERS.keys()), default=[])
     run_p.add_argument("--max-cost-usd", type=float)
     run_p.add_argument("--timeout-seconds", type=_positive_int)
+    run_p.add_argument("--profile", help="Named persistent browser profile from ProfileStore.")
+    run_p.add_argument("--proxy", help="Proxy hint (decodo/auto/sticky or full proxy URL).")
+    run_p.add_argument("--fleet", type=_fleet_size, help="Create 2-10 coordinated fleet runs with per-member profiles.")
     run_p.add_argument("--plan-only", action="store_true", help="Create the durable run plan without executing the provider.")
+
+    profiles_p = sub.add_parser("profiles", help="Manage named persistent browser profiles.")
+    profiles_sub = profiles_p.add_subparsers(dest="profiles_command", required=True)
+    profiles_create = profiles_sub.add_parser("create", help="Create a named browser profile.")
+    profiles_create.add_argument("--name", required=True)
+    profiles_create.add_argument("--description", default="")
+    profiles_create.add_argument("--preferred-provider", choices=list(PROVIDERS.keys()))
+    profiles_sub.add_parser("list", help="List saved browser profiles.")
+    profiles_get = profiles_sub.add_parser("get", help="Return one browser profile by name.")
+    profiles_get.add_argument("name")
+    profiles_delete = profiles_sub.add_parser("delete", help="Delete a browser profile.")
+    profiles_delete.add_argument("name")
 
     resume_p = sub.add_parser("resume", help="Resume a planned, approved, blocked, or failed run when policy allows.")
     resume_p.add_argument("run_id")
@@ -76,6 +97,15 @@ def main(argv: list[str] | None = None) -> int:
     manifest_p.add_argument("--root", help="Repository or installed bundle root to inspect.")
     manifest_p.add_argument("--path", help="Write manifest JSON to this path instead of only printing it.")
     sub.add_parser("env-checklist", help="Print required and optional Super Browser environment variables without values.")
+    setup_p = sub.add_parser(
+        "setup",
+        help="Return a step-by-step install walkthrough for agents (clone, pip, skills, MCP, doctor).",
+    )
+    setup_p.add_argument(
+        "--client",
+        choices=["cursor", "codex", "claude"],
+        help="Optional agent client hint to tailor install-skill and init-mcp commands.",
+    )
     live_p = sub.add_parser("live-test", help="Run gated local/provider live tests.")
     live_p.add_argument("--provider", choices=["local", "fixtures", "all", *PROVIDERS.keys()], default="local")
     live_p.add_argument("--workflow-class", choices=list(WORKFLOW_CLASSES), default="default")
@@ -89,6 +119,13 @@ def main(argv: list[str] | None = None) -> int:
     init_mcp_p.add_argument("--cwd", help="Repository or installed bundle path for the MCP server.")
     init_mcp_p.add_argument("--force", action="store_true", help="Overwrite an existing MCP config file.")
     init_mcp_p.add_argument("--merge", action="store_true", help="Merge super-browser into an existing MCP config without removing other servers.")
+
+    agent_p = sub.add_parser("agent", help="Start the optional Slack Socket Mode daemon (Level 2 ingress).")
+    agent_p.add_argument(
+        "--execute-on-approve",
+        action="store_true",
+        help="Execute provider runs immediately after Slack approval (default: env SUPER_BROWSER_SLACK_EXECUTE).",
+    )
 
     args = parser.parse_args(argv)
     try:
@@ -106,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             return _print(build_bundle_manifest(root=args.root))
         if args.command == "env-checklist":
             return _print(environment_checklist())
+        if args.command == "setup":
+            return _print(launch_setup(client=args.client))
         if args.command == "live-test":
             return _print(run_live_tests(args.provider, workflow_class=args.workflow_class))
         if args.command == "plan":
@@ -116,9 +155,47 @@ def main(argv: list[str] | None = None) -> int:
                 providers_allowed=args.allow_provider,
                 max_cost_usd=args.max_cost_usd,
                 timeout_seconds=args.timeout_seconds,
+                profile=args.profile,
+                proxy=args.proxy,
             )
             return _print(build_plan(task).to_dict())
+        if args.command == "profiles":
+            store = ProfileStore()
+            if args.profiles_command == "create":
+                profile = store.create(
+                    args.name,
+                    description=args.description,
+                    preferred_provider=args.preferred_provider,
+                )
+                return _print(profile.to_dict())
+            if args.profiles_command == "list":
+                return _print([item.to_dict() for item in store.list()])
+            if args.profiles_command == "get":
+                profile = store.get(args.name)
+                if not profile:
+                    return _error(f"Profile not found: {args.name}")
+                return _print(profile.to_dict())
+            if args.profiles_command == "delete":
+                deleted = store.delete(args.name)
+                if not deleted:
+                    return _error(f"Profile not found: {args.name}")
+                return _print({"deleted": args.name})
         if args.command == "run":
+            if args.fleet:
+                return _print(
+                    create_fleet_runs(
+                        args.goal,
+                        fleet_size=args.fleet,
+                        url=args.url,
+                        optimize=args.optimize,
+                        execute=not args.plan_only,
+                        providers_allowed=args.allow_provider,
+                        max_cost_usd=args.max_cost_usd,
+                        timeout_seconds=args.timeout_seconds,
+                        profile=args.profile,
+                        proxy=args.proxy,
+                    )
+                )
             run = create_run(
                 args.goal,
                 url=args.url,
@@ -127,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
                 providers_allowed=args.allow_provider,
                 max_cost_usd=args.max_cost_usd,
                 timeout_seconds=args.timeout_seconds,
+                profile=args.profile,
+                proxy=args.proxy,
             )
             return _print(run.to_dict())
         if args.command == "resume":
@@ -152,6 +231,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.path:
                 return _print(write_mcp_config(args.path, force=args.force, merge=args.merge, cwd=args.cwd))
             return _print(mcp_config(cwd=args.cwd))
+        if args.command == "agent":
+            slack_agent.run_slack_daemon(execute_on_approve=True if args.execute_on_approve else None)
+            return 0
         return _error("Unknown command")
     except Exception as exc:
         return _error_from_exception(exc)
@@ -175,6 +257,13 @@ def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
+
+
+def _fleet_size(value: str) -> int:
+    parsed = int(value)
+    if parsed < 2 or parsed > 10:
+        raise argparse.ArgumentTypeError("fleet size must be between 2 and 10")
     return parsed
 
 

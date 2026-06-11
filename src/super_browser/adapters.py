@@ -11,12 +11,14 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlencode, urlparse
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener, urlopen
 
 from .artifacts import annotate_artifact, annotate_artifacts
 from .models import ExecutionResult, Plan, TaskSpec, action_fingerprint_from_plan, plan_fingerprint, utc_now
 from .policy import approval_required as task_approval_required, draft_only_for_goal, infer_risk
+from .profiles import ProfileStore
+from .proxy import playwright_proxy_settings, proxy_dict_for_requests, resolve_proxy_url
 from .providers import PROVIDERS
 from .redaction import redact, redact_headers, redact_text, safe_json_dumps
 from .router import provider_sequence_constraint_failures, target_scope_for_url
@@ -38,6 +40,81 @@ class ProviderAdapter(Protocol):
 
     def execute(self, plan: Plan, run_id: str, artifact_dir: Path) -> ExecutionResult:
         ...
+
+
+def _task_proxy_url(task: TaskSpec) -> str | None:
+    return resolve_proxy_url(task, fleet_index=task.fleet_index)
+
+
+def _provider_profile_ref(task: TaskSpec, provider: str) -> str | None:
+    if not task.profile:
+        return None
+    bound = ProfileStore(create=False).resolve_provider_id(task.profile, provider)
+    return bound or task.profile
+
+
+def _browser_use_api_base() -> str:
+    return os.environ.get("BROWSER_USE_API_BASE", "https://api.browser-use.com").rstrip("/")
+
+
+def _browser_use_profile_id(task: TaskSpec) -> str | None:
+    if not task.profile:
+        return None
+    store = ProfileStore(create=False)
+    bound = store.resolve_provider_id(task.profile, "browser-use")
+    if bound:
+        return bound
+    api_key = os.environ.get("BROWSER_USE_API_KEY")
+    if not api_key:
+        return None
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        payload = _http_json(
+            f"{_browser_use_api_base()}/v3/profiles",
+            {"name": task.profile},
+            headers,
+            timeout_seconds=30,
+        )
+        profile_id = str(payload.get("id") or payload.get("profile_id") or "")
+        if profile_id:
+            ProfileStore().bind_provider_id(task.profile, "browser-use", profile_id)
+            return profile_id
+    except Exception:
+        return None
+    return None
+
+
+def _airtop_session_configuration(task: TaskSpec) -> dict[str, Any]:
+    configuration: dict[str, Any] = {"timeoutMinutes": int(os.environ.get("AIRTOP_TIMEOUT_MINUTES", "5"))}
+    if task.profile:
+        configuration["profileName"] = task.profile
+    return configuration
+
+
+def _hyperbrowser_session_options(task: TaskSpec) -> dict[str, Any]:
+    proxy_url = _task_proxy_url(task)
+    options: dict[str, Any] = {
+        "useStealth": bool(task.anti_bot_risk),
+        "useProxy": bool(os.environ.get("HYPERBROWSER_USE_PROXY") or proxy_url or task.proxy),
+    }
+    if task.profile:
+        options["profile"] = _provider_profile_ref(task, "hyperbrowser")
+    if proxy_url:
+        options["proxy"] = proxy_url
+    return options
+
+
+def _steel_session_body(task: TaskSpec) -> dict[str, Any]:
+    body: dict[str, Any] = {"timeout": _timeout_seconds(task, 300) * 1000}
+    if task.profile:
+        body["persistProfile"] = True
+        profile_ref = _provider_profile_ref(task, "steel")
+        if profile_ref:
+            body["profileId"] = profile_ref
+    proxy_url = _task_proxy_url(task)
+    if proxy_url:
+        body["proxy"] = proxy_url
+    return body
 
 
 def execute_plan(
@@ -204,10 +281,6 @@ def get_adapter(provider_name: str) -> ProviderAdapter:
         return RawHttpAdapter()
     if provider_name == "browser-use":
         return BrowserUseAdapter()
-    if provider_name == "rtrvr":
-        return RtrvrAdapter()
-    if provider_name == "browserbase-stagehand":
-        return BrowserbaseAdapter()
     if provider_name == "orgo":
         return OrgoAdapter()
     if provider_name == "airtop":
@@ -216,8 +289,6 @@ def get_adapter(provider_name: str) -> ProviderAdapter:
         return HyperbrowserAdapter()
     if provider_name == "steel":
         return SteelAdapter()
-    if provider_name == "browserless":
-        return BrowserlessAdapter()
     return ExternalProviderAdapter(provider_name)
 
 
@@ -834,9 +905,13 @@ class PlaywrightAdapter:
         text_timeout_ms = _timeout_milliseconds(task, 10_000)
         scope_guard: _BrowserRequestScopeGuard | None = None
         close_error = None
+        launch_kwargs: dict[str, Any] = {"headless": True}
+        proxy_settings = playwright_proxy_settings(_task_proxy_url(task))
+        if proxy_settings:
+            launch_kwargs["proxy"] = proxy_settings
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
+                browser = playwright.chromium.launch(**launch_kwargs)
                 try:
                     page = browser.new_page()
                     scope_guard = _install_browser_request_scope_guard(page, None, task)
@@ -881,6 +956,8 @@ class PlaywrightAdapter:
                     "title": title,
                     "text_length": len(text),
                     "screenshot": str(screenshot_path),
+                    "profile": task.profile,
+                    "used_proxy": bool(proxy_settings),
                 }
             ),
             encoding="utf-8",
@@ -928,7 +1005,7 @@ class RawHttpAdapter:
         target_evidence = _target_scope_evidence_for_url(task.url)
         if _target_scope_evidence_is_disallowed(task.target_scope, target_evidence):
             return _raw_http_target_scope_block_result(self.name, run_id, artifact_dir, task, target_evidence)
-        proxy = os.environ.get("DECODO_PROXY")
+        proxy = _task_proxy_url(task) or os.environ.get("DECODO_PROXY")
         request = Request(task.url, headers={"User-Agent": "SuperBrowser/0.3 (+https://github.com/jbellsolutions/super-browser)"})
         timeout_seconds = _timeout_seconds(task, 30)
         redirect_handler = _TargetScopeRedirectHandler(task.target_scope)
@@ -1090,264 +1167,16 @@ class BrowserUseAdapter:
     async def _run_browser_use(self, client_class, task: TaskSpec) -> dict:
         client = client_class()
         prompt = _task_prompt(task)
-        result = await asyncio.wait_for(client.run(prompt), timeout=_timeout_seconds(task, 600))
-        return _object_to_payload(result)
-
-
-class RtrvrAdapter:
-    name = "rtrvr"
-
-    def execute(self, plan: Plan, run_id: str, artifact_dir: Path) -> ExecutionResult:
-        provider = PROVIDERS[self.name]
-        missing = [env_name for env_name in provider.env_vars if not os.environ.get(env_name)]
-        if missing:
-            return _missing_credentials_result(self.name, missing)
-        preflight = _provider_url_scope_preflight(self.name, run_id, artifact_dir, plan.task)
-        if preflight:
-            return preflight
-        if shutil.which("rtrvr"):
-            return self._execute_cli(plan, artifact_dir)
-        return self._execute_http(plan, run_id, artifact_dir)
-
-    def _execute_cli(self, plan: Plan, artifact_dir: Path) -> ExecutionResult:
-        task = plan.task
-        cmd = ["rtrvr", "run", _task_prompt(task), "--target", "auto", "--json", "--no-stream"]
-        if task.url:
-            cmd.extend(["--url", task.url])
-        output_path = artifact_dir / "rtrvr-output.json"
-        timeout_seconds = _timeout_seconds(task, 600)
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds, check=False)
-        except subprocess.TimeoutExpired as exc:
-            _write_redacted_output(output_path, exc.stdout or exc.stderr)
-            return ExecutionResult(
-                provider=self.name,
-                status="failed",
-                error=f"Rtrvr CLI timed out after {timeout_seconds} second(s).",
-                artifacts=[{"type": "provider_output", "path": str(output_path), "provider": self.name}],
-                events=[_event("failed", "rtrvr_cli_timeout")],
-                verification={"confidence": "medium", "checks": [f"timeout_seconds={timeout_seconds}", "rtrvr CLI timed out"]},
-            )
-        except Exception as exc:
-            return ExecutionResult(
-                provider=self.name,
-                status="failed",
-                error=f"Rtrvr CLI failed to start: {exc}",
-                events=[_event("failed", "rtrvr_cli_start_failed")],
-            )
-        output = proc.stdout or proc.stderr
-        _write_redacted_output(output_path, output)
-        if proc.returncode != 0:
-            return ExecutionResult(
-                provider=self.name,
-                status="failed",
-                error=f"Rtrvr CLI exited with {proc.returncode}: {redact_text(proc.stderr.strip())}",
-                artifacts=[{"type": "provider_output", "path": str(output_path), "provider": self.name}],
-                events=[_event("failed", "rtrvr_cli_failed")],
-            )
-        failure_reason = _provider_output_failure_reason(output, self.name, empty_is_failure=True)
-        return ExecutionResult(
-            provider=self.name,
-            status="failed" if failure_reason else "complete",
-            artifacts=[{"type": "provider_output", "path": str(output_path), "provider": self.name, "transport": "cli"}],
-            events=[_event("failed" if failure_reason else "complete", "rtrvr_cli_task_failed" if failure_reason else "rtrvr_cli_task_complete")],
-            verification={
-                "confidence": "low" if failure_reason else "medium",
-                "checks": ["rtrvr CLI returned zero", "output saved", "provider output checked for explicit failure", f"timeout_seconds={timeout_seconds}"],
-            },
-            error=failure_reason,
-        )
-
-    def _execute_http(self, plan: Plan, run_id: str, artifact_dir: Path) -> ExecutionResult:
-        task = plan.task
-        api_key = os.environ["RTRVR_API_KEY"]
-        api_base = os.environ.get("RTRVR_API_BASE", "https://api.rtrvr.ai").rstrip("/")
-        transport_preflight = _provider_transport_preflight(self.name, run_id, artifact_dir, "RTRVR_API_BASE", api_base, PROVIDER_TRANSPORT_HTTP_SCHEMES)
-        if transport_preflight:
-            return transport_preflight
-        body = {
-            "input": _task_prompt(task),
-            "target": "auto",
-        }
-        if task.url:
-            body["urls"] = [task.url]
-        request = Request(
-            api_base + "/agent",
-            data=_json_dump(body).encode("utf-8"),
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        output_path = artifact_dir / "rtrvr-output.json"
-        timeout_seconds = _timeout_seconds(task, 600)
-        try:
-            response = urlopen(request, timeout=timeout_seconds)
-            raw = response.read()
-        except TimeoutError as exc:
-            return ExecutionResult(
-                provider=self.name,
-                status="failed",
-                error=f"Rtrvr HTTP request timed out after {timeout_seconds} second(s): {exc}",
-                events=[_event("failed", "rtrvr_http_timeout")],
-                verification={"confidence": "medium", "checks": [f"timeout_seconds={timeout_seconds}", "rtrvr HTTP request timed out"]},
-            )
-        except URLError as exc:
-            return ExecutionResult(
-                provider=self.name,
-                status="failed",
-                error=f"Rtrvr HTTP request failed: {exc}",
-                events=[_event("failed", "rtrvr_http_failed")],
-            )
-        _write_redacted_output(output_path, raw)
-        failure_reason = _provider_output_failure_reason(raw, self.name, empty_is_failure=True)
-        return ExecutionResult(
-            provider=self.name,
-            status="failed" if failure_reason else "complete",
-            artifacts=[{"type": "provider_output", "path": str(output_path), "provider": self.name, "transport": "http"}],
-            events=[_event("failed" if failure_reason else "complete", "rtrvr_http_task_failed" if failure_reason else "rtrvr_http_task_complete")],
-            verification={
-                "confidence": "low" if failure_reason else "medium",
-                "checks": ["rtrvr HTTP endpoint returned", "output saved", "provider output checked for explicit failure", f"timeout_seconds={timeout_seconds}"],
-            },
-            error=failure_reason,
-        )
-
-
-class BrowserbaseAdapter:
-    name = "browserbase-stagehand"
-
-    def execute(self, plan: Plan, run_id: str, artifact_dir: Path) -> ExecutionResult:
-        provider = PROVIDERS[self.name]
-        missing = [env_name for env_name in provider.env_vars if not os.environ.get(env_name)]
-        if missing:
-            return _missing_credentials_result(self.name, missing)
-        if not plan.task.url:
-            return ExecutionResult(
-                provider=self.name,
-                status="blocked",
-                error="Browserbase execution requires a URL. Add --url or include a URL in the goal.",
-                events=[_event("blocked", "missing_url")],
-            )
-        preflight = _provider_url_scope_preflight(self.name, run_id, artifact_dir, plan.task)
-        if preflight:
-            return preflight
-        try:
-            from browserbase import Browserbase
-            from playwright.sync_api import Error as PlaywrightError
-            from playwright.sync_api import sync_playwright
-        except Exception as exc:
-            return ExecutionResult(
-                provider=self.name,
-                status="blocked",
-                error=f"Browserbase execution requires `browserbase` and Playwright Python packages: {exc}",
-                artifacts=[{"type": "provider_docs", "provider": self.name, "url": provider.docs_url}],
-                events=[_event("blocked", "missing_browserbase_package")],
-                verification={"confidence": "low", "checks": ["credentials present", "Browserbase package import failed"]},
-            )
-        scope_guard: _BrowserRequestScopeGuard | None = None
-        bb = None
-        session_id: str | None = None
-        try:
-            bb = Browserbase(api_key=os.environ["BROWSERBASE_API_KEY"])
-            session_timeout_seconds = _browserbase_session_timeout_seconds(plan.task)
-            create_kwargs = {
-                "project_id": os.environ.get("BROWSERBASE_PROJECT_ID"),
-                "timeout": session_timeout_seconds,
-                "user_metadata": {"superBrowserRunId": run_id},
-            }
-            context_id = os.environ.get("BROWSERBASE_CONTEXT_ID")
-            if context_id:
-                create_kwargs["browser_settings"] = {"context": {"id": context_id, "persist": True}}
-            session = bb.sessions.create(**{key: value for key, value in create_kwargs.items() if value is not None})
-            connect_url = getattr(session, "connect_url", None) or getattr(session, "connectUrl", None)
-            session_id = getattr(session, "id", "unknown")
-            if not connect_url:
-                raise RuntimeError("Browserbase session did not return a connect URL")
-            screenshot_path = artifact_dir / "browserbase-page.png"
-            text_path = artifact_dir / "browserbase-page-text.txt"
-            meta_path = artifact_dir / "browserbase-meta.json"
-            navigation_timeout_ms = _timeout_milliseconds(plan.task, 30_000)
-            text_timeout_ms = _timeout_milliseconds(plan.task, 10_000)
-            close_error = None
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.connect_over_cdp(connect_url)
-                try:
-                    context = browser.contexts[0] if browser.contexts else browser.new_context()
-                    page = context.pages[0] if context.pages else context.new_page()
-                    scope_guard = _install_browser_request_scope_guard(page, context, plan.task)
-                    page.goto(plan.task.url, wait_until="domcontentloaded", timeout=navigation_timeout_ms)
-                    if scope_guard.blocked_requests:
-                        return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
-                    title = page.title()
-                    text = page.locator("body").inner_text(timeout=text_timeout_ms)
-                    if scope_guard.blocked_requests:
-                        return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
-                    page.screenshot(path=str(screenshot_path), full_page=True)
-                    if scope_guard.blocked_requests:
-                        return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
-                finally:
-                    close_error = _safe_browser_close(browser)
-        except PlaywrightError as exc:
-            _release_browserbase_session(bb, session_id)
-            if scope_guard and scope_guard.blocked_requests:
-                return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
-            return ExecutionResult(
-                provider=self.name,
-                status="blocked",
-                error=f"Browserbase Playwright connection failed: {exc}",
-                events=[_event("blocked", "browserbase_playwright_failed")],
-            )
-        except Exception as exc:
-            _release_browserbase_session(bb, session_id)
-            return ExecutionResult(
-                provider=self.name,
-                status="failed",
-                error=f"Browserbase execution failed: {exc}",
-                events=[_event("failed", "browserbase_execution_failed")],
-            )
-        text_path.write_text(redact_text(text) or "", encoding="utf-8")
-        meta_path.write_text(
-            _redacted_json_dump(
-                {
-                    "run_id": run_id,
-                    "provider": self.name,
-                    "session_id": session_id,
-                    "url": plan.task.url,
-                    "title": title,
-                    "text_length": len(text),
-                    "timeout_seconds": plan.task.timeout_seconds,
-                    "browserbase_session_timeout_seconds": session_timeout_seconds,
-                    "recording_url": f"https://browserbase.com/sessions/{session_id}" if session_id != "unknown" else None,
-                }
-            ),
-            encoding="utf-8",
-        )
-        events = [_event("complete", "browserbase_page_captured")]
-        checks = [
-            "created Browserbase session",
-            "connected over CDP",
-            "captured page artifacts",
-            f"timeout_seconds={_timeout_seconds(plan.task, 30)}",
-            f"browserbase_session_timeout_seconds={session_timeout_seconds}",
-            _browser_scope_guard_check(scope_guard),
-        ]
-        if close_error:
-            events.append(_event("warning", "browser_close_failed"))
-            checks.append("browser close failed after capture")
-        return ExecutionResult(
-            provider=self.name,
-            status="complete",
-            artifacts=[
-                {"type": "screenshot", "path": str(screenshot_path), "provider": self.name},
-                {"type": "text", "path": str(text_path), "provider": self.name, "chars": len(text)},
-                {"type": "metadata", "path": str(meta_path), "provider": self.name, "session_id": session_id},
-                {"type": "recording_url", "provider": self.name, "url": f"https://browserbase.com/sessions/{session_id}"},
-            ],
-            events=events,
-            verification={
-                "confidence": "high",
-                "checks": checks,
-            },
-        )
+        run_kwargs: dict[str, Any] = {}
+        profile_id = _browser_use_profile_id(task)
+        if profile_id:
+            run_kwargs["profile_id"] = profile_id
+        result = await asyncio.wait_for(client.run(prompt, **run_kwargs), timeout=_timeout_seconds(task, 600))
+        payload = _object_to_payload(result)
+        if profile_id and task.profile:
+            payload.setdefault("profile", task.profile)
+            payload.setdefault("profile_id", profile_id)
+        return payload
 
 
 class OrgoAdapter:
@@ -1355,18 +1184,29 @@ class OrgoAdapter:
 
     def execute(self, plan: Plan, run_id: str, artifact_dir: Path) -> ExecutionResult:
         provider = PROVIDERS[self.name]
-        missing = [env_name for env_name in ("ORGO_API_KEY", "ORGO_COMPUTER_ID") if not os.environ.get(env_name)]
+        missing = [env_name for env_name in provider.env_vars if not os.environ.get(env_name)]
         if missing:
             return _missing_credentials_result(self.name, missing)
         preflight = _provider_url_scope_preflight(self.name, run_id, artifact_dir, plan.task)
         if preflight:
             return preflight
-        computer_id = os.environ["ORGO_COMPUTER_ID"]
         api_base = os.environ.get("ORGO_API_BASE", "https://www.orgo.ai/api").rstrip("/")
         transport_preflight = _provider_transport_preflight(self.name, run_id, artifact_dir, "ORGO_API_BASE", api_base, PROVIDER_TRANSPORT_HTTP_SCHEMES)
         if transport_preflight:
             return transport_preflight
         timeout_seconds = _timeout_seconds(plan.task, 600)
+        auth_headers = {"Authorization": f"Bearer {os.environ['ORGO_API_KEY']}"}
+        try:
+            computer_id, computer_source = _orgo_resolve_computer_id(api_base, auth_headers, timeout_seconds)
+        except Exception as exc:
+            return ExecutionResult(
+                provider=self.name,
+                status="failed",
+                error=f"Orgo computer discovery failed: {exc}",
+                artifacts=[{"type": "provider_docs", "provider": self.name, "url": provider.docs_url}],
+                events=[_event("failed", "orgo_computer_discovery_failed")],
+                verification={"confidence": "low", "checks": ["attempted Orgo workspace/computer discovery", "no ORGO_COMPUTER_ID pinned", f"timeout_seconds={timeout_seconds}"]},
+            )
         try:
             chat_payload = _http_json(
                 _orgo_chat_completions_url(api_base),
@@ -1376,7 +1216,7 @@ class OrgoAdapter:
                     "messages": [{"role": "user", "content": _task_prompt(plan.task)}],
                     "stream": False,
                 },
-                {"Authorization": f"Bearer {os.environ['ORGO_API_KEY']}"},
+                auth_headers,
                 timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
@@ -1395,7 +1235,7 @@ class OrgoAdapter:
             screenshot_payload = _http_json(
                 f"{api_base}/computers/{computer_id}/screenshot",
                 None,
-                {"Authorization": f"Bearer {os.environ['ORGO_API_KEY']}"},
+                auth_headers,
                 method="GET",
                 timeout_seconds=timeout_seconds,
             )
@@ -1433,10 +1273,29 @@ class OrgoAdapter:
             events=[_event("complete" if success else "failed", "orgo_agent_and_screenshot_captured")],
             verification={
                 "confidence": "medium" if success else "low",
-                "checks": ["submitted Orgo computer-use agent task", "requested screenshot", "provider payload checked for explicit failure", f"timeout_seconds={timeout_seconds}"],
+                "checks": [f"computer: {computer_source}", "submitted Orgo computer-use agent task", "requested screenshot", "provider payload checked for explicit failure", f"timeout_seconds={timeout_seconds}"],
             },
             error=failure_reason,
         )
+
+
+AIRTOP_SESSION_READY_TIMEOUT_SECONDS = 120
+AIRTOP_SESSION_POLL_INTERVAL_SECONDS = 2.0
+
+
+def _airtop_wait_for_session_running(api_base: str, session_id: str, headers: dict[str, str], timeout_seconds: int) -> str:
+    """Airtop sessions start as `initializing`; window APIs 404 until the session is `running`."""
+    deadline = time.monotonic() + min(timeout_seconds, AIRTOP_SESSION_READY_TIMEOUT_SECONDS)
+    status = "unknown"
+    while time.monotonic() < deadline:
+        payload = _http_json(f"{api_base}/sessions/{session_id}", None, headers, method="GET", timeout_seconds=timeout_seconds)
+        status = str(_payload_get(payload, "data.status") or "unknown")
+        if status == "running":
+            return status
+        if status in {"terminated", "error", "failed"}:
+            raise RuntimeError(f"Airtop session {session_id} entered terminal status {status!r} before becoming ready")
+        time.sleep(AIRTOP_SESSION_POLL_INTERVAL_SECONDS)
+    raise RuntimeError(f"Airtop session {session_id} did not reach running status in time (last status {status!r})")
 
 
 class AirtopAdapter:
@@ -1468,13 +1327,14 @@ class AirtopAdapter:
         try:
             session_payload = _http_json(
                 f"{api_base}/sessions",
-                {"configuration": {"timeoutMinutes": int(os.environ.get("AIRTOP_TIMEOUT_MINUTES", "5"))}},
+                {"configuration": _airtop_session_configuration(plan.task)},
                 headers,
                 timeout_seconds=timeout_seconds,
             )
             session_id = _payload_get(session_payload, "data.id")
             if not session_id:
                 raise RuntimeError("Airtop session response did not include data.id")
+            _airtop_wait_for_session_running(api_base, session_id, headers, timeout_seconds)
             window_payload = _http_json(
                 f"{api_base}/sessions/{session_id}/windows",
                 {"url": plan.task.url, "waitUntil": "domContentLoaded"},
@@ -1568,10 +1428,7 @@ class HyperbrowserAdapter:
         timeout_seconds = _timeout_seconds(plan.task, 600)
         scrape_body = {
             "url": plan.task.url,
-            "sessionOptions": {
-                "useStealth": bool(plan.task.anti_bot_risk),
-                "useProxy": bool(os.environ.get("HYPERBROWSER_USE_PROXY")),
-            },
+            "sessionOptions": _hyperbrowser_session_options(plan.task),
             "scrapeOptions": {
                 "formats": ["markdown", "html", "links"],
                 "onlyMainContent": False,
@@ -1682,11 +1539,39 @@ class SteelAdapter:
                 verification={"confidence": "low", "checks": ["credentials present", "Playwright import failed"]},
             )
 
-        params = {"apiKey": os.environ["STEEL_API_KEY"], "sessionId": run_id}
-        cdp_url = os.environ.get("STEEL_CDP_URL") or f"wss://connect.steel.dev?{urlencode(params)}"
-        transport_preflight = _provider_transport_preflight(self.name, run_id, artifact_dir, "STEEL_CDP_URL", cdp_url, PROVIDER_TRANSPORT_CDP_SCHEMES)
-        if transport_preflight:
-            return transport_preflight
+        api_key = os.environ["STEEL_API_KEY"]
+        api_base = (os.environ.get("STEEL_API_BASE") or "https://api.steel.dev/v1").rstrip("/")
+        rest_headers = {"steel-api-key": api_key}
+        session_id = ""
+        cdp_url = os.environ.get("STEEL_CDP_URL") or ""
+        if cdp_url:
+            transport_preflight = _provider_transport_preflight(self.name, run_id, artifact_dir, "STEEL_CDP_URL", cdp_url, PROVIDER_TRANSPORT_CDP_SCHEMES)
+            if transport_preflight:
+                return transport_preflight
+        else:
+            try:
+                session_payload = _http_json(
+                    f"{api_base}/sessions",
+                    _steel_session_body(plan.task),
+                    rest_headers,
+                    timeout_seconds=_timeout_seconds(plan.task, 60),
+                )
+            except Exception as exc:
+                return ExecutionResult(
+                    provider=self.name,
+                    status="blocked",
+                    error=f"Steel session creation failed: {exc}",
+                    events=[_event("blocked", "steel_session_create_failed")],
+                )
+            session_id = str(_payload_get(session_payload, "id") or _payload_get(session_payload, "data.id") or "")
+            if not session_id:
+                return ExecutionResult(
+                    provider=self.name,
+                    status="blocked",
+                    error="Steel session response did not include a session id",
+                    events=[_event("blocked", "steel_session_missing_id")],
+                )
+            cdp_url = f"wss://connect.steel.dev?{urlencode({'apiKey': api_key, 'sessionId': session_id})}"
         screenshot_path = artifact_dir / "steel-page.png"
         text_path = artifact_dir / "steel-page-text.txt"
         meta_path = artifact_dir / "steel-meta.json"
@@ -1695,40 +1580,47 @@ class SteelAdapter:
         scope_guard: _BrowserRequestScopeGuard | None = None
         close_error = None
         try:
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.connect_over_cdp(cdp_url)
+            try:
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.connect_over_cdp(cdp_url)
+                    try:
+                        context = browser.contexts[0] if browser.contexts else browser.new_context()
+                        page = context.pages[0] if context.pages else context.new_page()
+                        scope_guard = _install_browser_request_scope_guard(page, context, plan.task)
+                        page.goto(plan.task.url, wait_until="domcontentloaded", timeout=navigation_timeout_ms)
+                        if scope_guard.blocked_requests:
+                            return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
+                        title = page.title()
+                        text = page.locator("body").inner_text(timeout=text_timeout_ms)
+                        if scope_guard.blocked_requests:
+                            return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
+                        page.screenshot(path=str(screenshot_path), full_page=True)
+                        if scope_guard.blocked_requests:
+                            return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
+                    finally:
+                        close_error = _safe_browser_close(browser)
+            except PlaywrightError as exc:
+                if scope_guard and scope_guard.blocked_requests:
+                    return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
+                return ExecutionResult(
+                    provider=self.name,
+                    status="blocked",
+                    error=f"Steel Playwright connection failed: {exc}",
+                    events=[_event("blocked", "steel_playwright_failed")],
+                )
+            except Exception as exc:
+                return ExecutionResult(
+                    provider=self.name,
+                    status="failed",
+                    error=f"Steel execution failed: {exc}",
+                    events=[_event("failed", "steel_execution_failed")],
+                )
+        finally:
+            if session_id:
                 try:
-                    context = browser.contexts[0] if browser.contexts else browser.new_context()
-                    page = context.pages[0] if context.pages else context.new_page()
-                    scope_guard = _install_browser_request_scope_guard(page, context, plan.task)
-                    page.goto(plan.task.url, wait_until="domcontentloaded", timeout=navigation_timeout_ms)
-                    if scope_guard.blocked_requests:
-                        return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
-                    title = page.title()
-                    text = page.locator("body").inner_text(timeout=text_timeout_ms)
-                    if scope_guard.blocked_requests:
-                        return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
-                    page.screenshot(path=str(screenshot_path), full_page=True)
-                    if scope_guard.blocked_requests:
-                        return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
-                finally:
-                    close_error = _safe_browser_close(browser)
-        except PlaywrightError as exc:
-            if scope_guard and scope_guard.blocked_requests:
-                return _browser_request_scope_block_result(self.name, run_id, artifact_dir, plan.task, scope_guard)
-            return ExecutionResult(
-                provider=self.name,
-                status="blocked",
-                error=f"Steel Playwright connection failed: {exc}",
-                events=[_event("blocked", "steel_playwright_failed")],
-            )
-        except Exception as exc:
-            return ExecutionResult(
-                provider=self.name,
-                status="failed",
-                error=f"Steel execution failed: {exc}",
-                events=[_event("failed", "steel_execution_failed")],
-            )
+                    _http_json(f"{api_base}/sessions/{session_id}/release", {}, rest_headers, timeout_seconds=30)
+                except Exception:
+                    pass
 
         text_path.write_text(redact_text(text) or "", encoding="utf-8")
         meta_path.write_text(
@@ -1736,11 +1628,14 @@ class SteelAdapter:
                 {
                     "run_id": run_id,
                     "provider": self.name,
+                    "session_id": session_id or None,
                     "url": plan.task.url,
                     "title": title,
                     "text_length": len(text),
                     "cdp_url_host": "connect.steel.dev",
                     "timeout_seconds": plan.task.timeout_seconds,
+                    "profile": plan.task.profile,
+                    "used_proxy": bool(_task_proxy_url(plan.task)),
                 }
             ),
             encoding="utf-8",
@@ -1771,59 +1666,6 @@ class SteelAdapter:
         )
 
 
-class BrowserlessAdapter:
-    name = "browserless"
-
-    def execute(self, plan: Plan, run_id: str, artifact_dir: Path) -> ExecutionResult:
-        provider = PROVIDERS[self.name]
-        missing = [env_name for env_name in provider.env_vars if not os.environ.get(env_name)]
-        if missing:
-            return _missing_credentials_result(self.name, missing)
-        if not plan.task.url:
-            return ExecutionResult(
-                provider=self.name,
-                status="blocked",
-                error="Browserless execution requires a URL. Add --url or include a URL in the goal.",
-                events=[_event("blocked", "missing_url")],
-            )
-        preflight = _provider_url_scope_preflight(self.name, run_id, artifact_dir, plan.task)
-        if preflight:
-            return preflight
-
-        base_url = os.environ.get("BROWSERLESS_BASE_URL", "https://production-sfo.browserless.io").rstrip("/")
-        transport_preflight = _provider_transport_preflight(self.name, run_id, artifact_dir, "BROWSERLESS_BASE_URL", base_url, PROVIDER_TRANSPORT_HTTP_SCHEMES)
-        if transport_preflight:
-            return transport_preflight
-        query = urlencode({"token": os.environ["BROWSERLESS_TOKEN"]})
-        body = {"url": plan.task.url, "elements": [{"selector": "body"}]}
-        timeout_seconds = _timeout_seconds(plan.task, 600)
-        try:
-            payload = _http_json(f"{base_url}/scrape?{query}", body, {}, timeout_seconds=timeout_seconds)
-        except Exception as exc:
-            return ExecutionResult(
-                provider=self.name,
-                status="failed",
-                error=f"Browserless scrape failed: {exc}",
-                artifacts=[{"type": "provider_docs", "provider": self.name, "url": provider.docs_url}],
-                events=[_event("failed", "browserless_scrape_failed")],
-            )
-
-        output_path = artifact_dir / "browserless-output.json"
-        output_path.write_text(_redacted_json_dump({"run_id": run_id, "provider": self.name, "result": payload, "timeout_seconds": timeout_seconds}), encoding="utf-8")
-        failure_reason = _provider_payload_failure_reason(payload, self.name)
-        return ExecutionResult(
-            provider=self.name,
-            status="failed" if failure_reason else "complete",
-            artifacts=[{"type": "provider_output", "path": str(output_path), "provider": self.name}],
-            events=[_event("failed" if failure_reason else "complete", "browserless_scrape_failed" if failure_reason else "browserless_scrape_complete")],
-            verification={
-                "confidence": "low" if failure_reason else "medium",
-                "checks": ["called Browserless scrape API", "saved scrape result", "provider payload checked for explicit failure", f"timeout_seconds={timeout_seconds}"],
-            },
-            error=failure_reason,
-        )
-
-
 class ExternalProviderAdapter:
     def __init__(self, provider_name: str):
         self.name = provider_name
@@ -1843,22 +1685,6 @@ class ExternalProviderAdapter:
         )
 
 
-def _release_browserbase_session(bb: Any, session_id: str | None) -> None:
-    # Best-effort release so a session created before a failed CDP connect does
-    # not linger (and bill) until its server-side timeout. Safe to call on an
-    # already-ended session; any SDK/transport error is intentionally ignored.
-    if bb is None or not session_id or session_id == "unknown":
-        return
-    try:
-        bb.sessions.update(
-            session_id,
-            status="REQUEST_RELEASE",
-            project_id=os.environ.get("BROWSERBASE_PROJECT_ID"),
-        )
-    except Exception:
-        return
-
-
 def _missing_credentials_result(provider_name: str, missing: list[str]) -> ExecutionResult:
     provider = PROVIDERS[provider_name]
     return ExecutionResult(
@@ -1872,11 +1698,22 @@ def _missing_credentials_result(provider_name: str, missing: list[str]) -> Execu
 
 
 def _http_json(url: str, body: dict | None, headers: dict[str, str], method: str = "POST", timeout_seconds: int | None = None) -> dict:
-    request_headers = {"Content-Type": "application/json"}
+    # Some provider edges (e.g. Steel behind Cloudflare) reject the default Python-urllib user agent with 403.
+    request_headers = {"Content-Type": "application/json", "User-Agent": "super-browser/1.0"}
     request_headers.update(headers)
     data = None if body is None else _json_dump(body).encode("utf-8")
     request = Request(url, data=data, headers=request_headers, method=method)
-    response = urlopen(request, timeout=timeout_seconds or 600)
+    try:
+        response = urlopen(request, timeout=timeout_seconds or 600)
+    except HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        if detail:
+            raise HTTPError(exc.url, exc.code, f"{exc.reason}: {detail}", exc.headers, None) from None
+        raise
     raw = response.read()
     if not raw:
         return {}
@@ -1895,11 +1732,6 @@ def _timeout_milliseconds(task: TaskSpec, default: int) -> int:
     if task.timeout_seconds is None:
         return default
     return max(1, int(task.timeout_seconds) * 1000)
-
-
-def _browserbase_session_timeout_seconds(task: TaskSpec) -> int:
-    timeout_seconds = _timeout_seconds(task, 600)
-    return min(21_600, max(60, timeout_seconds))
 
 
 def _safe_browser_close(browser) -> str | None:
@@ -2056,6 +1888,56 @@ def _payload_value_summary(value: Any) -> str:
 def _orgo_chat_completions_url(api_base: str) -> str:
     base = api_base.rstrip("/")
     return f"{base}/v1/chat/completions" if base.endswith("/api") else f"{base}/chat/completions"
+
+
+ORGO_DEFAULT_WORKSPACE_NAME = "super-browser"
+ORGO_DEFAULT_COMPUTER_NAME = "super-browser-agent"
+ORGO_AUTO_STOP_MINUTES = 30
+
+
+def _orgo_collection(payload, keys: tuple[str, ...]) -> list[dict]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for candidate in (*keys, "data", "items"):
+            value = payload.get(candidate)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _orgo_resolve_computer_id(api_base: str, headers: dict[str, str], timeout_seconds: int) -> tuple[str, str]:
+    """Resolve an Orgo computer id: pinned env, then reuse, then start, then create."""
+    pinned = os.environ.get("ORGO_COMPUTER_ID")
+    if pinned:
+        return pinned, "pinned via ORGO_COMPUTER_ID"
+    # Orgo's live API returns workspace lists under "projects" and computers under "desktops".
+    workspaces = _orgo_collection(_http_json(f"{api_base}/workspaces", None, headers, method="GET", timeout_seconds=timeout_seconds), ("workspaces", "projects"))
+    workspace = next((item for item in workspaces if item.get("name") == ORGO_DEFAULT_WORKSPACE_NAME), None)
+    if workspace is None and workspaces:
+        workspace = workspaces[0]
+    if workspace is None:
+        workspace = _http_json(f"{api_base}/workspaces", {"name": ORGO_DEFAULT_WORKSPACE_NAME}, headers, timeout_seconds=timeout_seconds)
+    workspace_id = workspace["id"]
+    detail = _http_json(f"{api_base}/workspaces/{workspace_id}", None, headers, method="GET", timeout_seconds=timeout_seconds)
+    computers = _orgo_collection(detail, ("computers", "desktops"))
+    running = [item for item in computers if item.get("status") == "running"]
+    chosen = next((item for item in running if item.get("name") == ORGO_DEFAULT_COMPUTER_NAME), None)
+    if chosen is None and running:
+        chosen = running[0]
+    if chosen is not None:
+        return chosen["id"], f"reused running computer {chosen.get('name', chosen['id'])}"
+    if computers:
+        target = next((item for item in computers if item.get("name") == ORGO_DEFAULT_COMPUTER_NAME), computers[0])
+        _http_json(f"{api_base}/computers/{target['id']}/start", {}, headers, timeout_seconds=timeout_seconds)
+        return target["id"], f"started existing computer {target.get('name', target['id'])}"
+    created = _http_json(
+        f"{api_base}/computers",
+        {"workspace_id": workspace_id, "name": ORGO_DEFAULT_COMPUTER_NAME, "auto_stop_minutes": ORGO_AUTO_STOP_MINUTES},
+        headers,
+        timeout_seconds=timeout_seconds,
+    )
+    return created["id"], f"created computer {ORGO_DEFAULT_COMPUTER_NAME} in workspace {workspace_id}"
 
 
 def _task_prompt(task: TaskSpec) -> str:

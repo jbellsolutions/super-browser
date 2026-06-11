@@ -29,10 +29,10 @@ class RouterPolicyTests(unittest.TestCase):
             build_plan(infer_task("Fetch this JSON endpoint through raw HTTP", url="file:///tmp/super-browser-fixture.json"))
 
     def test_provider_allowlist_is_strict(self):
-        plan = build_plan(infer_task("Extract titles from https://example.com", providers_allowed=["browserless"]))
-        self.assertEqual(plan.primary_provider, "browserless")
+        plan = build_plan(infer_task("Extract titles from https://example.com", providers_allowed=["steel"]))
+        self.assertEqual(plan.primary_provider, "steel")
         self.assertEqual(plan.fallback_providers, [])
-        self.assertEqual(plan.council_report["planner_decision"]["providers_allowed"], ["browserless"])
+        self.assertEqual(plan.council_report["planner_decision"]["providers_allowed"], ["steel"])
 
     def test_malformed_provider_allowlist_raises_in_core_router(self):
         with self.assertRaisesRegex(ValueError, "providers_allowed must be a list"):
@@ -153,13 +153,13 @@ class RouterPolicyTests(unittest.TestCase):
 
     def test_provider_constraints_reject_primary_provider_that_requires_missing_url(self):
         plan = build_plan(infer_task("Search the web for public mentions of this brand"))
-        plan.primary_provider = "browserless"
+        plan.primary_provider = "steel"
         plan.fallback_providers = []
 
         failures = provider_sequence_constraint_failures(plan)
 
         missing_url = next(failure for failure in failures if failure["type"] == "provider_missing_url_constraint_violation")
-        self.assertEqual(missing_url["provider"], "browserless")
+        self.assertEqual(missing_url["provider"], "steel")
 
     def test_provider_constraints_reject_raw_http_without_http_url(self):
         plan = build_plan(infer_task("Search the web for public mentions of this brand"))
@@ -172,7 +172,7 @@ class RouterPolicyTests(unittest.TestCase):
 
     def test_generated_url_less_plan_does_not_violate_provider_constraints(self):
         plan = build_plan(infer_task("Search the web for public mentions of this brand"))
-        self.assertNotIn(plan.primary_provider, {"playwright", "decodo-http", "browserbase-stagehand", "airtop", "hyperbrowser", "steel", "browserless"})
+        self.assertNotIn(plan.primary_provider, {"playwright", "decodo-http", "airtop", "hyperbrowser", "steel"})
         self.assertEqual(provider_sequence_constraint_failures(plan), [])
 
     def test_invalid_optimize_raises_in_core_router(self):
@@ -232,19 +232,20 @@ class RouterPolicyTests(unittest.TestCase):
             self.assertEqual(plan.mode, "council")
             self.assertEqual(plan.primary_provider, "orgo")
             self.assertIn("ORGO_API_KEY", plan.missing_env)
-            self.assertIn("ORGO_COMPUTER_ID", plan.missing_env)
+            self.assertNotIn("ORGO_COMPUTER_ID", plan.missing_env)
             orgo_steps = [step for step in plan.steps if step.provider == "orgo"]
-            self.assertIn("ORGO_COMPUTER_ID", orgo_steps[0].required_env)
+            self.assertIn("ORGO_API_KEY", orgo_steps[0].required_env)
+            self.assertNotIn("ORGO_COMPUTER_ID", orgo_steps[0].required_env)
         finally:
             if old_key is not None:
                 os.environ["ORGO_API_KEY"] = old_key
             if old_id is not None:
                 os.environ["ORGO_COMPUTER_ID"] = old_id
 
-    def test_auth_prefers_rtrvr(self):
+    def test_auth_prefers_browser_use(self):
         plan = build_plan(infer_task("Use my logged in Chrome session to read private dashboard notifications"))
         self.assertEqual(plan.mode, "council")
-        self.assertEqual(plan.primary_provider, "rtrvr")
+        self.assertEqual(plan.primary_provider, "browser-use")
         safety_steps = [step for step in plan.steps if step.provider == "publishing-safety-specialist"]
         self.assertEqual(safety_steps[0].risk, "credential")
 
@@ -255,7 +256,7 @@ class RouterPolicyTests(unittest.TestCase):
         self.assertTrue(task.requires_auth)
         self.assertTrue(approval_required(task))
         self.assertTrue(plan.approval_required)
-        self.assertEqual(plan.primary_provider, "rtrvr")
+        self.assertEqual(plan.primary_provider, "browser-use")
         self.assertEqual(plan.mode, "council")
 
     def test_public_profile_read_does_not_require_auth_or_approval(self):
@@ -321,7 +322,7 @@ class RouterPolicyTests(unittest.TestCase):
     def test_url_less_external_write_avoids_url_required_primary_provider(self):
         plan = build_plan(infer_task("Send a message in the browser"))
         self.assertTrue(plan.approval_required)
-        self.assertNotIn(plan.primary_provider, {"playwright", "decodo-http", "browserbase-stagehand", "airtop", "hyperbrowser", "steel", "browserless"})
+        self.assertNotIn(plan.primary_provider, {"playwright", "decodo-http", "airtop", "hyperbrowser", "steel"})
 
     def test_social_and_lead_gen_actions_require_approval(self):
         goals = [
