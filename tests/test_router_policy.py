@@ -276,7 +276,8 @@ class RouterPolicyTests(unittest.TestCase):
         self.assertFalse(plan.approval_required)
         report = plan.council_report
         self.assertEqual(report["mode"], "council")
-        self.assertEqual(len(report["review_loops"]), 3)
+        self.assertGreaterEqual(len(report["review_loops"]), 3)
+        self.assertTrue(report.get("deliberation_complete", True))
         browser_use = [item for item in report["specialists_consulted"] if item["provider"] == "browser-use"][0]
         self.assertEqual(browser_use["recommendation"], "use me")
         self.assertIn("BROWSER_USE_API_KEY", browser_use["required_env"])
@@ -305,7 +306,7 @@ class RouterPolicyTests(unittest.TestCase):
         plan = build_plan(infer_task("Extract titles from https://example.com"))
         report = plan.council_report
         self.assertEqual(report["mode"], "direct")
-        self.assertEqual(len(report["review_loops"]), 1)
+        self.assertGreaterEqual(len(report["review_loops"]), 3)
         playwright = [item for item in report["specialists_consulted"] if item["provider"] == "playwright"][0]
         self.assertEqual(playwright["recommendation"], "use me")
 

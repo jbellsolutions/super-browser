@@ -7,7 +7,7 @@ Routing starts with one question: **what does the task need?** Capabilities deci
 | What do you need? | Capability | Providers that have it |
 | --- | --- | --- |
 | Deterministic local browser, fixtures, `file://` | local runtime | `playwright` only |
-| Anti-bot hardened browsing | `supports_anti_bot` | `browser-use`, `hyperbrowser`, `steel`, `orgo` |
+| Anti-bot hardened browsing | `supports_anti_bot` | `browser-use`, `hyperbrowser`, `steel`, `browserbase` (docs-only) |
 | CAPTCHA solving | `supports_captcha` | `browser-use`, `hyperbrowser`, `steel` |
 | Authenticated sessions / logins | `supports_auth` | `browser-use`, `airtop`, `hyperbrowser`, `steel`, `orgo` |
 | Persistent named profiles (reusable logged-in state) | `supports_profiles` | `browser-use`, `airtop`, `hyperbrowser`, `steel` |

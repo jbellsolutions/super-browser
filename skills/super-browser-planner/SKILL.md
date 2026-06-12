@@ -16,8 +16,9 @@ Act as the developer/planning agent. Produce a decision-complete implementation 
 3. Identify relevant provider specialists from `specialists_consulted`.
 4. Confirm each specialist recommendation: `use me`, `use me only as fallback`, `do not use me`, or `not enough proof`.
 5. Enforce any provider allowlist or `max_cost_usd`; impossible constraints must fail planning.
-6. Run 1 to 3 critique loops for risky, expensive, authenticated, long-running, desktop, or external-write jobs.
-7. Return a plan with provider order, exact missing env vars, approval gates, expected artifacts, and verification steps.
+6. Run **3 to 5 deliberation loops** (direct=3, council=5). Read `council_report.review_loops`, `deliberation_complete`, `execution_pattern`, and `documented_recommendations`.
+7. Do not execute until `deliberation_complete` is true.
+8. Return a plan with provider order, exact missing env vars, approval gates, expected artifacts, and verification steps.
 
 ## Output Contract
 
@@ -46,3 +47,4 @@ Return:
 - Read `../../references/provider-matrix.md`.
 - Read `../../references/cost-model.md`.
 - Read `../../references/routing-playbook.md`.
+- Read `../../references/combo-playbook.md` and `../../references/providers/README.md`.

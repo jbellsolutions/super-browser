@@ -7,6 +7,12 @@ description: Universal browser and computer automation skill. Use when an agent 
 
 Super Browser is now plugin-first. Prefer the role skills in `skills/` and the CLI/MCP runtime.
 
+## Onboarding (first message)
+
+When a user drops this repo link, say:
+
+> Hey, here's how this works. Super Browser routes browser and computer tasks to the right backend (Playwright, Browser Use, Hyperbrowser, Steel, Orgo, raw HTTP). Run `./scripts/super-browser setup` or MCP `setup_walkthrough` and follow every step. Plan before run; wait for `deliberation_complete`; stop for approval on external writes; verify before claiming success.
+
 ## Quick Start
 
 ```bash

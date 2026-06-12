@@ -2,11 +2,26 @@
 
 Repo: [https://github.com/jbellsolutions/super-browser](https://github.com/jbellsolutions/super-browser)
 
-Give an agent this one-liner:
+## First message to the user
 
-> Clone `https://github.com/jbellsolutions/super-browser`, run `./scripts/super-browser setup`, follow each step (skills, MCP, `.env` keys), run `doctor`, then use the `super-browser-orchestrator` skill for all browser and computer automation. Plan before execute; stop for approval on external writes.
+When someone shares this repo, start with:
 
-Step-by-step guide with signup links: [setup-walkthrough.md](setup-walkthrough.md). Machine-readable: `./scripts/super-browser setup` or MCP `setup_walkthrough`.
+> **Hey, here's how this works.** Super Browser is a routing layer for browser and computer automation. You describe a goal in plain language; Super Browser classifies the task, runs **3–5 deliberation loops** to pick the cheapest capable provider (Playwright, Browser Use, Hyperbrowser, Steel, Orgo, or raw HTTP), stops risky external writes for human approval, executes with fallbacks, and verifies artifacts before claiming success. API keys live in `.env` on the machine — never in chat.
+
+Then run setup and follow every step:
+
+```bash
+git clone https://github.com/jbellsolutions/super-browser.git && cd super-browser
+./scripts/super-browser setup
+```
+
+The `setup` command returns the same `welcome` text plus numbered steps (or use MCP `setup_walkthrough`).
+
+## One-liner for any agent
+
+> Clone `https://github.com/jbellsolutions/super-browser`, run `./scripts/super-browser setup`, follow each step (skills, MCP, `.env` keys), run `doctor`, then use the `super-browser-orchestrator` skill for all browser and computer automation. **Plan** before **run**. Do not execute until `deliberation_complete` is true in the plan. Stop for approval on external writes.
+
+Step-by-step guide: [setup-walkthrough.md](setup-walkthrough.md).
 
 ## What you get
 
@@ -14,10 +29,21 @@ Step-by-step guide with signup links: [setup-walkthrough.md](setup-walkthrough.m
 | --- | --- |
 | **Plugin** (`.claude-plugin/` or `.codex-plugin/`) | Skills + MCP in one package for Claude Code / Codex |
 | **Skills** (`skills/`) | Orchestrator, planner, verifier, provider specialists |
-| **MCP** (`mcp/super-browser-server`) | JSON tools: plan, run, approve, profiles, fleet |
+| **MCP** (`mcp/super-browser-server`) | JSON tools: plan, run, approve, profiles, fleet, `setup_walkthrough` |
 | **Python CLI** (`super-browser`) | Same runtime without MCP — scripts and humans |
 
 There is no separate HTTP API. Agents use **MCP tools** or the **CLI** (stdout JSON).
+
+## Deliberation (before every run)
+
+| Mode | Loops | When |
+| --- | --- | --- |
+| Direct | 3 | Single clear provider path |
+| Council | 5 | Multiple cloud providers could work |
+
+The plan includes `council_report.deliberation_complete`. **Do not call `run` until it is true.**
+
+Provider SSOT: [references/providers/](../references/providers/) · Combos: [combo-playbook.md](../references/combo-playbook.md) · Browserbase is **docs-only** until [audit](../references/providers/browserbase-capability-audit.md) criteria are met.
 
 ## Fastest path (Claude Code / Codex plugin)
 
@@ -61,6 +87,7 @@ Run from a cloned repo, or from `pip install super-browser` (uses packaged `shar
 | "Post a LinkedIn comment" | `run` → stops at `awaiting_approval` → you `approve` with reason |
 | "Run the same read on 5 accounts" | `run --fleet 5 --profile base-acct` |
 | "Fetch this JSON endpoint cheaply" | Routes to `decodo-http` when goal implies raw HTTP |
+| "Use Stagehand on Browserbase" | Deliberation surfaces docs-only path; suggest live equivalent or custom Stagehand harness |
 
 ## Skill to invoke
 
@@ -74,17 +101,15 @@ Supporting skills: `super-browser-planner`, `super-browser-verifier`, `publishin
 ./scripts/verify-super-browser
 ```
 
+## Weekly provider intelligence (maintainers)
+
+```bash
+python3 scripts/weekly-provider-intelligence.py              # dry run report
+python3 scripts/weekly-provider-intelligence.py --apply --verify   # update cache + SSOT stamps
+```
+
+GitHub Action: `.github/workflows/weekly-provider-intelligence.yml` (Mondays, auto-commit when configured).
+
 ## Printing Press CLI (separate artifact)
 
 The in-repo **Python CLI** ships with the plugin. A **Printing Press Go CLI** (installable binary + MCP) is a planned second distribution channel — see `docs/printing-press-cli.md`. Until that is published, use the Python CLI or MCP tools above.
-
-## Slack ingress (optional)
-
-See `docs/slack-agent-setup.md` for token setup, then:
-
-```bash
-pip install slack-bolt
-export SLACK_BOT_TOKEN=xoxb-...
-export SLACK_APP_TOKEN=xapp-...
-./scripts/super-browser agent
-```

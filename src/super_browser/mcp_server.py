@@ -74,6 +74,21 @@ RESOURCE_FILES = {
         "name": "Live Test Matrix",
         "description": "Fixture and provider live-test scenarios and gating rules.",
     },
+    "super-browser://references/combo-playbook": {
+        "path": "references/combo-playbook.md",
+        "name": "Combo Playbook",
+        "description": "When to combine providers vs use one tool alone.",
+    },
+    "super-browser://references/providers/README": {
+        "path": "references/providers/README.md",
+        "name": "Provider SSOT Index",
+        "description": "Per-provider capability documents for deliberation and weekly intelligence.",
+    },
+    "super-browser://references/providers/browserbase-capability-audit": {
+        "path": "references/providers/browserbase-capability-audit.md",
+        "name": "Browserbase Capability Audit",
+        "description": "Adapter ship/no-ship verdict and trigger criteria for Browserbase.",
+    },
     "super-browser://docs/setup-walkthrough": {
         "path": "docs/setup-walkthrough.md",
         "name": "Setup Walkthrough",
@@ -115,6 +130,12 @@ PLAN_INPUT_SCHEMA = {
         "timeout_seconds": {"type": "integer", "minimum": 1, "description": "Optional provider execution timeout in seconds."},
         "profile": {"type": "string", "minLength": 1, "description": "Named persistent browser profile from ProfileStore."},
         "proxy": {"type": "string", "minLength": 1, "description": "Proxy hint (decodo/auto/sticky or full proxy URL)."},
+        "deliberation_rounds": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 5,
+            "description": "Planner deliberation loops (3 direct, 5 council).",
+        },
     },
     "required": ["goal"],
     "additionalProperties": False,
@@ -342,10 +363,14 @@ def _task_kwargs(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _deliberation_rounds(args: dict[str, Any]) -> int | None:
+    return args.get("deliberation_rounds")
+
+
 def _handle_tool(name: str, args: dict[str, Any]) -> Any:
     if name == "plan_browser_task":
         task = infer_task(args["goal"], **_task_kwargs(args))
-        return build_plan(task).to_dict()
+        return build_plan(task, deliberation_rounds=_deliberation_rounds(args)).to_dict()
     if name == "run_browser_task":
         fleet_size = args.get("fleet_size")
         if fleet_size:
@@ -358,6 +383,7 @@ def _handle_tool(name: str, args: dict[str, Any]) -> Any:
         run = create_run(
             args["goal"],
             execute=args.get("execute", True),
+            deliberation_rounds=_deliberation_rounds(args),
             **_task_kwargs(args),
         )
         return run.to_dict()

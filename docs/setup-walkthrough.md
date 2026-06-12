@@ -2,9 +2,21 @@
 
 Repo: [https://github.com/jbellsolutions/super-browser](https://github.com/jbellsolutions/super-browser)
 
+## Hey, here's how this works
+
+Super Browser is a **routing layer** for browser and computer automation:
+
+1. You describe a goal in **plain language** (extract a page, log in, scrape behind anti-bot, draft a post, fetch JSON).
+2. Super Browser **classifies** the task and runs **3–5 deliberation loops** to pick the cheapest provider that can actually do the job.
+3. **Risky external writes** (posts, DMs, purchases, CRM changes) stop at **human approval**.
+4. The runtime **executes** with primary + fallback providers and saves **artifacts** under `.super-browser/`.
+5. **Verify** checks run reports and artifacts before anyone claims success.
+
+You do **not** choose Hyperbrowser vs Steel vs Playwright manually for every task. You do **not** paste API keys into chat — copy `.env.example` to `.env` locally.
+
 Give an agent this prompt:
 
-> Install Super Browser from `https://github.com/jbellsolutions/super-browser`. Run `./scripts/super-browser setup`, follow every step, install skills and MCP, run doctor, then use `super-browser-orchestrator` for browser tasks. Never paste API keys into chat — use `.env` locally.
+> Install Super Browser from `https://github.com/jbellsolutions/super-browser`. Run `./scripts/super-browser setup`, follow every step, install skills and MCP, run doctor, then use `super-browser-orchestrator` for browser tasks. Plan before run. Wait for `deliberation_complete`. Never paste API keys into chat — use `.env` locally.
 
 Machine-readable steps (same content as this doc):
 
@@ -13,7 +25,7 @@ Machine-readable steps (same content as this doc):
 ./scripts/super-browser setup --client cursor   # optional: tailor commands
 ```
 
-MCP equivalent: `setup_walkthrough` with optional `client`.
+MCP equivalent: `setup_walkthrough` — returns `welcome` plus numbered steps. Use that as the **first message** when someone drops the GitHub link into Claude Code, Codex, or Cursor.
 
 ---
 
@@ -59,6 +71,7 @@ Edit `.env` locally. **Do not commit `.env` and do not paste secrets into chat.*
 | Steel | `STEEL_API_KEY` | [steel.dev](https://steel.dev/) | Hosted Chromium over Playwright CDP |
 | Orgo | `ORGO_API_KEY` | [orgo.ai](https://orgo.ai/) | Full desktop / computer-use VMs |
 | Decodo (optional) | `DECODO_PROXY` | [decodo.com](https://decodo.com/) | Residential proxy for raw HTTP |
+| Browserbase (optional, docs-only) | `BROWSERBASE_API_KEY` | [browserbase.com](https://www.browserbase.com/) | Documented for Stagehand/Model Gateway — **no live adapter yet** ([audit](../references/providers/browserbase-capability-audit.md)) |
 
 Local Playwright and direct raw HTTP work **without** paid keys.
 
@@ -83,58 +96,63 @@ Check what's still missing:
 ./scripts/super-browser install-skill --target ~/.codex/skills --force
 ```
 
-**Claude Code** — enable `.claude-plugin/plugin.json` in the plugin picker, or copy skills the same way:
+**Claude Code**
 
 ```bash
 ./scripts/super-browser install-skill --target ~/.claude/skills --force
 ```
 
+Or use the bundled `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` and set `SUPER_BROWSER_REPO_ROOT` to this repo.
+
 ## Step 7 — Wire MCP
 
-**Cursor**
+**Cursor / Hermes**
 
 ```bash
 ./scripts/super-browser init-mcp --path ~/.cursor/mcp.json --merge --cwd "$(pwd)"
 ```
 
-**Codex**
+Restart the IDE so the MCP server loads.
+
+## Step 8 — Doctor + first plan
 
 ```bash
-./scripts/super-browser init-mcp --path ~/.codex/mcp.json --merge --cwd "$(pwd)"
+./scripts/super-browser doctor
+./scripts/super-browser plan --goal "Extract the page title from https://example.com"
 ```
 
-Restart the IDE so MCP loads `super-browser`.
+Confirm the JSON includes `council_report.deliberation_complete: true` before running anything that mutates external state.
 
-**Claude Code plugin** — `.mcp.json` ships with the repo; set `SUPER_BROWSER_REPO_ROOT` and enable the plugin.
-
-## Step 8 — Smoke test (no paid keys)
-
-```bash
-./scripts/super-browser live-test --provider local
-./scripts/super-browser live-test --provider fixtures
-```
-
-## Step 9 — Certify cloud providers (after keys)
-
-```bash
-./scripts/super-browser live-test --provider all
-./scripts/super-browser production-readiness
-```
-
-`production-readiness` stays **blocked** until each provider you care about has live-test evidence. That is expected before keys are configured.
-
-## Step 10 — Use the orchestrator
-
-Tell your agent:
-
-> Use the **super-browser-orchestrator** skill. Plan with `plan_browser_task` or `super-browser plan`. Stop for approval on external writes. Verify with `verify_browser_run` before claiming success.
-
-## Optional — Slack daemon
-
-See [slack-agent-setup.md](slack-agent-setup.md) for Socket Mode tokens and `super-browser agent`.
-
-## Full repo verify (maintainers)
+## Step 9 — Full verification (optional but recommended)
 
 ```bash
 ./scripts/verify-super-browser
 ```
+
+## How deliberation fits in
+
+| Loops | When |
+| --- | --- |
+| 3 | Straightforward task — one obvious provider path |
+| 5 | Council mode — multiple cloud providers could work |
+
+Read the plan's `council_report` for provider order, cost estimate, `execution_pattern`, and optional `combo_steps`. SSOT docs: [references/providers/](../references/providers/) and [combo-playbook.md](../references/combo-playbook.md).
+
+## Natural-language workflow for agents
+
+1. `setup_walkthrough` or `./scripts/super-browser setup` on first contact.
+2. `plan_browser_task` / `super-browser plan` for every new goal.
+3. If `awaiting_approval`, wait for human `approve_browser_run` with reason.
+4. `run_browser_task` / `super-browser run` only after plan is complete.
+5. `verify_browser_run` before reporting success.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| MCP tools missing | Re-run `init-mcp --merge`, restart IDE |
+| `doctor` fails on keys | Expected until you add paid providers; local Playwright still works |
+| Run blocked "deliberation incomplete" | Re-plan with `--deliberation-rounds 5` |
+| Browserbase in plan but not executed | Docs-only by design — use live path from `documented_recommendations` |
+
+More: [agent-quickstart.md](agent-quickstart.md) · [README](../README.md)

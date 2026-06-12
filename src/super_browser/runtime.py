@@ -67,6 +67,7 @@ def create_run(
     profile: str | None = None,
     proxy: str | None = None,
     fleet_index: int | None = None,
+    deliberation_rounds: int | None = None,
 ) -> RunState:
     task = infer_task(
         goal,
@@ -79,7 +80,7 @@ def create_run(
         proxy=proxy,
         fleet_index=fleet_index,
     )
-    plan = build_plan(task)
+    plan = build_plan(task, deliberation_rounds=deliberation_rounds)
     status = "awaiting_approval" if plan.approval_required else "planned"
     run = RunState.create(plan, status=status)
     run.artifacts.append({"type": "plan", "provider": plan.primary_provider})
@@ -87,8 +88,18 @@ def create_run(
         run.approvals.append(approval_request_from_plan(plan))
     store = RunStore()
     store.save(run)
-    if execute and not plan.approval_required:
+    deliberation_complete = plan.council_report.get("deliberation_complete", True)
+    if execute and not plan.approval_required and deliberation_complete:
         run = _execute_run(run, store, "execution_started")
+    elif execute and not deliberation_complete:
+        run.events.append(
+            {
+                "at": utc_now(),
+                "type": "execution_deferred",
+                "reason": "deliberation_incomplete",
+            }
+        )
+        store.save(run)
     return run
 
 

@@ -9,7 +9,7 @@ Capabilities decide which providers can do a job; the escalation rank only order
 | Rank | Providers | Role |
 | --- | --- | --- |
 | **1** | `playwright`, `browser-use` | Default browser automation — local deterministic work vs anti-bot cloud |
-| **2** | `hyperbrowser`, `airtop` | Cloud scale — scrape jobs, page-query, GTM automations |
+| **2** | `hyperbrowser`, `airtop`, `browserbase` (docs-only) | Cloud scale — scrape jobs, page-query, GTM automations, hosted agents (Browserbase when adapter ships) |
 | **3** | `steel` | Hosted Chromium — Playwright CDP control of cloud browser sessions |
 | **4** | `orgo` | Full desktop VMs — browser plus files plus terminal |
 | **Separate lane** | `decodo-http` | Raw HTTP/proxy only — never in browser fallbacks |
@@ -23,6 +23,7 @@ Capabilities decide which providers can do a job; the escalation rank only order
 | Steel | 3 | implemented-live-gated | Playwright CDP control of Steel cloud browser sessions, agent browser infrastructure | Raw HTTP endpoints, full desktop work, production before live task proof | `STEEL_API_KEY` |
 | Orgo | 4 | implemented-live-gated | Full computer/desktop automation, browser plus files plus terminal, multi-window workflows | Browser-only or raw HTTP tasks | `ORGO_API_KEY` (optional `ORGO_COMPUTER_ID` pin) |
 | Decodo Raw HTTP | separate | verified-pattern | Supplied `http://` or `https://` API endpoints, JSON endpoints, optional residential proxy fetches, cheap bulk data | Missing endpoint, browser rendering, advanced headless detection, personal logged-in sessions | optional `DECODO_PROXY` for residential proxy routing |
+| Browserbase | 2 | docs-only | Stagehand, hosted web agents, Model Gateway BYOK, stealth sessions (documented; adapter gated) | Hyperbrowser scrape or Steel CDP already sufficient; no adapter wired | `BROWSERBASE_API_KEY` when adapter ships |
 
 ## Provider Selection Notes
 

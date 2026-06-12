@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .costs import estimate_provider_cost, estimate_sequence_cost
+from .deliberation import deliberate
 from .models import Plan, PlanStep, TargetScope, TaskSpec
 from .policy import approval_required, enrich_policy_flags, infer_risk, long_running_for_goal, requires_auth_for_goal
 from .profiles import ProfileStore
@@ -24,6 +25,7 @@ PROVIDER_ESCALATION_RANK: dict[str, int] = {
     "browser-use": 1,
     "hyperbrowser": 2,
     "airtop": 2,
+    "browserbase": 2,
     "steel": 3,
     "orgo": 4,
     "decodo-http": -1,
@@ -124,7 +126,7 @@ def infer_task(
     return enrich_policy_flags(task)
 
 
-def build_plan(task: TaskSpec) -> Plan:
+def build_plan(task: TaskSpec, *, deliberation_rounds: int | None = None) -> Plan:
     _validate_task_constraints(task)
     if task.profile:
         _ensure_profile_exists(task.profile)
@@ -132,10 +134,17 @@ def build_plan(task: TaskSpec) -> Plan:
     ranked = rank_providers(task)
     if not ranked:
         raise ValueError(_constraint_error(task))
-    primary = ranked[0]
-    fallbacks = ranked[1:5]
-    missing_env = _missing_env([primary] + fallbacks)
     mode = "council" if _needs_council(task) else "direct"
+    deliberation = deliberate(
+        task,
+        ranked,
+        mode=mode,
+        missing_env=_missing_env,
+        deliberation_rounds=deliberation_rounds,
+    )
+    primary = deliberation.primary or ranked[0]
+    fallbacks = deliberation.fallbacks or ranked[1:5]
+    missing_env = _missing_env([primary] + fallbacks)
     risk = infer_risk(task.goal)
     cost_estimate = estimate_sequence_cost([primary, *fallbacks], task)
     steps = [
@@ -180,7 +189,16 @@ def build_plan(task: TaskSpec) -> Plan:
         missing_env=missing_env,
         approval_required=approval_required(task),
         rationale=_rationale(task, primary, mode),
-        council_report=_council_report(task, ranked, primary, fallbacks, missing_env, mode, cost_estimate),
+        council_report=_council_report(
+            task,
+            ranked,
+            primary,
+            fallbacks,
+            missing_env,
+            mode,
+            cost_estimate,
+            deliberation=deliberation,
+        ),
         cost_estimate=cost_estimate,
     )
 
@@ -247,6 +265,7 @@ def _candidate_providers(task: TaskSpec) -> list[str]:
         candidates = [name for name in candidates if PROVIDERS[name].supports_profiles]
     if task.proxy:
         candidates = [name for name in candidates if PROVIDERS[name].supports_proxy_injection or name == "decodo-http"]
+    candidates = [name for name in candidates if PROVIDERS[name].stability != "docs-only"]
     return candidates
 
 
@@ -642,6 +661,13 @@ def _required_env_for(provider_name: str) -> list[str]:
 
 
 def _needs_council(task: TaskSpec) -> bool:
+    ranked = rank_providers(task)
+    cloud_tier = {"hyperbrowser", "steel", "browser-use", "airtop"}
+    cloud_ambiguous = (
+        len(ranked) >= 2
+        and ranked[0] in cloud_tier
+        and ranked[1] in cloud_tier
+    )
     return any(
         [
             task.requires_auth,
@@ -650,6 +676,7 @@ def _needs_council(task: TaskSpec) -> bool:
             task.external_write,
             task.long_running,
             task.target_scope in {"loopback", "private_network", "link_local", "local_file"},
+            cloud_ambiguous,
         ]
     )
 
@@ -678,15 +705,22 @@ def _council_report(
     missing_env: list[str],
     mode: str,
     cost_estimate: dict,
+    deliberation: Any | None = None,
 ) -> dict:
     sequence = [primary, *fallbacks]
-    specialists = [_specialist_review(name, task, sequence, primary) for name in ranked]
-    loops = _review_loops(task, mode, primary, fallbacks)
+    specialists = [_specialist_review(name, task, sequence, primary) for name in ranked if name in PROVIDERS]
+    loops = deliberation.loops if deliberation else _review_loops(task, mode, primary, fallbacks)
+    deliberation_complete = deliberation.deliberation_complete if deliberation else True
     return {
         "mode": mode,
         "selected_sequence": sequence,
         "specialists_consulted": specialists,
         "review_loops": loops,
+        "deliberation_complete": deliberation_complete,
+        "deliberation_loop_count": deliberation.loop_count if deliberation else len(loops),
+        "execution_pattern": deliberation.execution_pattern if deliberation else "single",
+        "combo_steps": deliberation.combo_steps if deliberation else [],
+        "documented_recommendations": deliberation.documented_recommendations if deliberation else [],
         "planner_decision": {
             "primary_provider": primary,
             "fallback_providers": fallbacks,

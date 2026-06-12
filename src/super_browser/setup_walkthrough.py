@@ -112,6 +112,15 @@ def launch_setup(*, client: str | None = None) -> dict[str, Any]:
 
     return {
         "type": "super_browser_setup_walkthrough",
+        "welcome": (
+            "Hey, here's how this works. Super Browser is a routing layer for browser and computer "
+            "automation: your agent describes a goal in plain language, Super Browser classifies the task, "
+            "runs 3–5 deliberation loops to pick the cheapest capable provider (Playwright, Browser Use, "
+            "Hyperbrowser, Steel, Orgo, or raw HTTP), stops risky external writes for your approval, "
+            "executes with fallbacks, and verifies artifacts before claiming success. "
+            "You do not paste API keys into chat — copy .env.example to .env locally. "
+            "Follow the steps below in order."
+        ),
         "repo": "https://github.com/jbellsolutions/super-browser",
         "docs": {
             "quickstart": "docs/agent-quickstart.md",

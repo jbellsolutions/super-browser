@@ -40,10 +40,13 @@ def _handle_plan_or_run(goal: str, *, user_id: str, execute: bool) -> str:
     run = create_run(goal, execute=execute)
     payload = run.to_dict()
     plan = payload.get("plan", {})
+    council = plan.get("council_report") or {}
     lines = [
         f"run_id: {payload.get('run_id')}",
         f"status: {payload.get('status')}",
         f"provider: {plan.get('primary_provider')}",
+        f"deliberation_loops: {council.get('deliberation_loop_count', len(council.get('review_loops', [])))}",
+        f"deliberation_complete: {council.get('deliberation_complete', True)}",
     ]
     if plan.get("approval_required"):
         lines.append("approval_required: true — reply `approve <run_id> <reason>` to continue.")

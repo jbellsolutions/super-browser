@@ -94,9 +94,14 @@ PROVIDERS: dict[str, ProviderCapability] = {
         cost_band="variable",
         env_vars=["HYPERBROWSER_API_KEY"],
         docs_url="https://www.hyperbrowser.ai/docs/home",
-        best_for=["cloud browser automation to evaluate", "scale-oriented browser workflows"],
-        avoid_when=["the workflow has not passed live tests yet"],
+        best_for=[
+            "REST scrape jobs with markdown/html/links output",
+            "geo-targeted proxy scrape experiments",
+            "scale-oriented browser workflows after live tests",
+        ],
+        avoid_when=["the workflow has not passed live tests yet", "Playwright CDP control is required"],
         supports_auth=True,
+        supports_anti_bot=True,
         supports_long_running=True,
         supports_captcha=True,
         supports_profiles=True,
@@ -110,9 +115,38 @@ PROVIDERS: dict[str, ProviderCapability] = {
         cost_band="variable",
         env_vars=["STEEL_API_KEY"],
         docs_url="https://docs.steel.dev/",
-        best_for=["cloud browser sessions to evaluate", "agent-friendly browser infrastructure"],
-        avoid_when=["the workflow has not passed live tests yet"],
+        best_for=[
+            "Playwright CDP sessions against hosted Chromium",
+            "Selenium-backed cloud browsers",
+            "computer-use loops that need a real browser surface",
+        ],
+        avoid_when=["the workflow has not passed live tests yet", "a REST scrape job is enough"],
         supports_auth=True,
+        supports_anti_bot=True,
+        supports_long_running=True,
+        supports_captcha=True,
+        supports_profiles=True,
+        supports_proxy_injection=True,
+        supports_fleet=True,
+    ),
+    "browserbase": ProviderCapability(
+        name="browserbase",
+        display_name="Browserbase",
+        stability="docs-only",
+        cost_band="variable",
+        env_vars=["BROWSERBASE_API_KEY"],
+        docs_url="https://docs.browserbase.com/",
+        best_for=[
+            "Stagehand-native hosted web agents",
+            "stealth browser sessions with BYOK LLM via Model Gateway",
+            "session persistence and observability for agent workflows",
+        ],
+        avoid_when=[
+            "Hyperbrowser scrape or Steel CDP already satisfies the task",
+            "no BROWSERBASE_API_KEY and no adapter is wired yet",
+        ],
+        supports_auth=True,
+        supports_anti_bot=True,
         supports_long_running=True,
         supports_captcha=True,
         supports_profiles=True,
@@ -145,7 +179,7 @@ def provider_readiness() -> list[dict]:
             package = _has_module("playwright.sync_api")
         elif provider.name == "browser-use":
             package = _has_module("browser_use_sdk")
-        elif provider.name in {"orgo", "airtop", "hyperbrowser"}:
+        elif provider.name in {"orgo", "airtop", "hyperbrowser", "browserbase"}:
             package = True
         elif provider.name == "steel":
             package = _has_module("playwright.sync_api")
@@ -281,6 +315,8 @@ def _readiness_status(
     certified_workflow_classes: list[str],
     stale_certified_workflow_classes: list[str],
 ) -> str:
+    if stability == "docs-only":
+        return "documented_only"
     if missing_required_env:
         return "missing_env"
     if package is False:

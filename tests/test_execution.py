@@ -977,15 +977,15 @@ class ExecutionTests(unittest.TestCase):
                     {
                         "run_id": run.run_id,
                         "plan_sha256": plan_fingerprint(run.plan),
-                        "final_provider": "steel",
+                        "final_provider": "browserbase",
                         "final_status": "failed",
-                        "attempts": [{"order": 1, "provider": "steel", "status": "failed", "error": "simulated failure"}],
+                        "attempts": [{"order": 1, "provider": "browserbase", "status": "failed", "error": "simulated failure"}],
                     },
                     handle,
                 )
             run.status = "failed"
-            run.artifacts.append({"type": "run_report", "provider": "steel", "path": report_path})
-            run.verification = {"confidence": "medium", "selected_provider": "steel", "checks": ["simulated inconsistent run"]}
+            run.artifacts.append({"type": "run_report", "provider": "browserbase", "path": report_path})
+            run.verification = {"confidence": "medium", "selected_provider": "browserbase", "checks": ["simulated inconsistent run"]}
             RunStore().save(run)
 
             with patch("super_browser.runtime.execute_plan") as execute_mock:

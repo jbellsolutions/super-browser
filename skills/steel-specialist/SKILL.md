@@ -27,7 +27,7 @@ description: "Escalation rank 3 (hosted Chromium): Evaluate and use Steel for cl
 
 The adapter uses Playwright's CDP connection:
 
-1. Builds `wss://connect.steel.dev?apiKey=...&sessionId=<run-id>` unless `STEEL_CDP_URL` is set.
+1. Creates a Steel session via REST (`POST /v1/sessions`) and builds `wss://connect.steel.dev?apiKey=...&sessionId=<steel-session-id>` unless `STEEL_CDP_URL` is set.
 2. Connects with Playwright Python.
 3. Navigates to the requested URL.
 4. Captures screenshot, body text, and metadata.

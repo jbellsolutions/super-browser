@@ -49,7 +49,7 @@ class TaskSpec:
 class ProviderCapability:
     name: str
     display_name: str
-    stability: Literal["stable", "evaluating", "docs-only"]
+    stability: Literal["stable", "evaluating", "docs-only"]  # docs-only: SSOT + deliberation, no adapter dispatch
     cost_band: Literal["free", "low", "medium", "high", "variable"]
     env_vars: list[str]
     docs_url: str

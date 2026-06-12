@@ -36,6 +36,11 @@ def main(argv: list[str] | None = None) -> int:
     plan_p.add_argument("--timeout-seconds", type=_positive_int)
     plan_p.add_argument("--profile", help="Named persistent browser profile from ProfileStore.")
     plan_p.add_argument("--proxy", help="Proxy hint (decodo/auto/sticky or full proxy URL).")
+    plan_p.add_argument(
+        "--deliberation-rounds",
+        type=_deliberation_rounds,
+        help="Planner deliberation loops (3-5). Default: 3 direct, 5 council.",
+    )
 
     run_p = sub.add_parser("run", help="Create and execute a durable browser automation run when policy allows.")
     run_p.add_argument("--goal", required=True)
@@ -48,6 +53,11 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--proxy", help="Proxy hint (decodo/auto/sticky or full proxy URL).")
     run_p.add_argument("--fleet", type=_fleet_size, help="Create 2-10 coordinated fleet runs with per-member profiles.")
     run_p.add_argument("--plan-only", action="store_true", help="Create the durable run plan without executing the provider.")
+    run_p.add_argument(
+        "--deliberation-rounds",
+        type=_deliberation_rounds,
+        help="Planner deliberation loops (3-5). Default: 3 direct, 5 council.",
+    )
 
     profiles_p = sub.add_parser("profiles", help="Manage named persistent browser profiles.")
     profiles_sub = profiles_p.add_subparsers(dest="profiles_command", required=True)
@@ -158,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
                 profile=args.profile,
                 proxy=args.proxy,
             )
-            return _print(build_plan(task).to_dict())
+            return _print(build_plan(task, deliberation_rounds=args.deliberation_rounds).to_dict())
         if args.command == "profiles":
             store = ProfileStore()
             if args.profiles_command == "create":
@@ -206,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_seconds=args.timeout_seconds,
                 profile=args.profile,
                 proxy=args.proxy,
+                deliberation_rounds=args.deliberation_rounds,
             )
             return _print(run.to_dict())
         if args.command == "resume":
@@ -264,6 +275,13 @@ def _fleet_size(value: str) -> int:
     parsed = int(value)
     if parsed < 2 or parsed > 10:
         raise argparse.ArgumentTypeError("fleet size must be between 2 and 10")
+    return parsed
+
+
+def _deliberation_rounds(value: str) -> int:
+    parsed = int(value)
+    if parsed < 3 or parsed > 5:
+        raise argparse.ArgumentTypeError("deliberation rounds must be between 3 and 5")
     return parsed
 
 

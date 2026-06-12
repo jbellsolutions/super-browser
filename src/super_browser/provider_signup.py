@@ -9,6 +9,15 @@ PROVIDER_SIGNUP = {
         "env_var": "BROWSER_USE_API_KEY",
         "required_for": "Anti-bot cloud browser, profiles, recordings",
     },
+    "BROWSERBASE_API_KEY": {
+        "provider": "browserbase",
+        "label": "Browserbase",
+        "signup_url": "https://www.browserbase.com/",
+        "docs_url": "https://docs.browserbase.com/",
+        "env_var": "BROWSERBASE_API_KEY",
+        "required_for": "Stagehand, hosted web agents, stealth sessions (docs-only until adapter ships)",
+        "optional": True,
+    },
     "HYPERBROWSER_API_KEY": {
         "provider": "hyperbrowser",
         "label": "Hyperbrowser",
